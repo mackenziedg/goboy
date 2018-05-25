@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io/ioutil"
 )
 
@@ -10,18 +11,11 @@ func check(e error) {
 	}
 }
 
-func argsToUint16(args []uint8) uint16 {
-	out := uint16(0)
-	out += uint16(args[1]) << 8
-	out += uint16(args[0])
-	return out
-}
-
 func main() {
 
 	dat, err := ioutil.ReadFile("./data/DMG_ROM.bin")
 	check(err)
-	for i := 0; i < len(dat); i++ {
-		Instruction(dat[i])
-	}
+	dat = dat[:len(dat)-1]
+	fmt.Printf("Data is %d bytes long.\n", len(dat))
+	RunFile(dat)
 }
