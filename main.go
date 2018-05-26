@@ -15,6 +15,6 @@ func main() {
 
 	dat, err := ioutil.ReadFile("./data/DMG_ROM.bin")
 	check(err)
-	fmt.Printf("Data is %d bytes long.\n", len(dat))
+	fmt.Printf("Data is %d bytes long.\n\n", len(dat))
 	RunFile(dat)
 }
