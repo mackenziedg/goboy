@@ -1,6 +1,11 @@
 package main
 
+import "math/rand"
+
+const MEMORYSIZE = 0x10000
+
 type Memory interface {
+	Reset(zero bool)
 	ReadByte(address uint16) uint8
 	ReadWord(address uint16) uint16
 	WriteByte(address uint16, value uint8)
@@ -8,7 +13,18 @@ type Memory interface {
 }
 
 type MMU struct {
-	memory [0x10000]uint8
+	memory [MEMORYSIZE]uint8
+}
+
+func (m *MMU) Reset(zero bool) {
+	m.memory = [MEMORYSIZE]uint8{}
+	if zero {
+		return
+	} else {
+		for i := 0; i < len(m.memory); i++ {
+			m.memory[i] = uint8(rand.Intn(0x100))
+		}
+	}
 }
 
 func (m *MMU) ReadByte(address uint16) uint8 {

@@ -35,7 +35,7 @@ var registers16 = map[string]uint16{
 	"PC": 0x0,
 }
 
-var mmu = MMU{memory: [0x10000]uint8{}}
+var mmu = new(MMU)
 
 func PrintInstruction(location uint16, opcode uint8, name string, length, duration, shortDuration uint8) {
 	fmt.Printf("Byte %X\n\t%X|%s: length: %d, duration: %d/%d\n", location, opcode, name, length, duration, shortDuration)
@@ -133,9 +133,12 @@ func printFlagRegister() {
 	)
 }
 
+var breaking = true
+
 func RunFile(data []byte) {
 	reader := bufio.NewReader(os.Stdin)
 	nBytes := uint16(len(data))
+	mmu.Reset(false)
 
 	var i uint16
 	cb := false
@@ -168,8 +171,8 @@ func Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFlag bool) 
 	} else {
 
 		switch opcode {
-		// INC/DEC
 
+		// INC/DEC
 		case 0x04:
 			name = "INC B"
 			length = 1
@@ -186,6 +189,7 @@ func Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFlag bool) 
 			duration = 4
 			registers8["B"] -= 1
 			setSubtractionFlag()
+			unsetZeroFlag()
 			if registers8["B"] == 0 {
 				setZeroFlag()
 			} else if registers8["B"] == 255 {
@@ -206,6 +210,7 @@ func Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFlag bool) 
 			length = 1
 			duration = 4
 			setSubtractionFlag()
+			unsetZeroFlag()
 			if registers8["C"] == 0 {
 				setZeroFlag()
 			} else if registers8["C"] == 255 {
@@ -407,7 +412,13 @@ func Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFlag bool) 
 			name = "JR r8"
 			length = 2
 			duration = 12
-			fmt.Println("Not implemented")
+			arg := uint16(argBytes[0])
+			jump = true
+			if arg > 127 {
+				jumpTo = location - (256 - arg)
+			} else {
+				jumpTo = location + arg
+			}
 		case 0x20:
 			name = "JR NZ,r8"
 			length = 2
@@ -416,7 +427,7 @@ func Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFlag bool) 
 			arg := uint16(argBytes[0])
 			if !getZeroFlag() {
 				jump = true
-				if arg > 128 {
+				if arg > 127 {
 					jumpTo = location - (256 - arg)
 				} else {
 					jumpTo = location + arg
@@ -427,7 +438,15 @@ func Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFlag bool) 
 			length = 2
 			duration = 12
 			shortDuration = 8
-			fmt.Println("Not implemented")
+			arg := uint16(argBytes[0])
+			if getZeroFlag() {
+				jump = true
+				if arg > 127 {
+					jumpTo = location - (256 - arg)
+				} else {
+					jumpTo = location + arg
+				}
+			}
 
 			// Stack ops
 		case 0xC5:
@@ -512,10 +531,12 @@ func Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFlag bool) 
 	}
 
 	// Logging
-	PrintInstruction(location, opcode, name, length, duration, shortDuration)
-	printRegisters()
-	printFlagRegister()
-	fmt.Println()
+	if breaking {
+		PrintInstruction(location, opcode, name, length, duration, shortDuration)
+		printRegisters()
+		printFlagRegister()
+		fmt.Println()
+	}
 
 	if !jump {
 		location += uint16(length)
