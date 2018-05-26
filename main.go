@@ -7,7 +7,7 @@ func check(e error) {
 }
 
 func main() {
-	var gb = new(GameBoy)
+	var gb = &(GameBoy{})
 	gb.Reset()
 	// gb.LoadROMFromFile("./data/DMG_ROM.bin")
 	gb.Start()

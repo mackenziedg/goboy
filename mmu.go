@@ -2,14 +2,6 @@ package main
 
 const MEMORYSIZE = 0x10000
 
-type Memory interface {
-	Reset(zero bool)
-	ReadByte(address uint16) uint8
-	ReadWord(address uint16) uint16
-	WriteByte(address uint16, value uint8)
-	WriteWord(address uint16, value uint16)
-}
-
 type MMU struct {
 	memory [MEMORYSIZE]uint8
 }
