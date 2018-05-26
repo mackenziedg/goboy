@@ -1,10 +1,5 @@
 package main
 
-import (
-	"fmt"
-	"io/ioutil"
-)
-
 func check(e error) {
 	if e != nil {
 		panic(e)
@@ -12,9 +7,8 @@ func check(e error) {
 }
 
 func main() {
-
-	dat, err := ioutil.ReadFile("./data/DMG_ROM.bin")
-	check(err)
-	fmt.Printf("Data is %d bytes long.\n\n", len(dat))
-	RunFile(dat)
+	var gb = new(GameBoy)
+	gb.Reset()
+	// gb.LoadROMFromFile("./data/DMG_ROM.bin")
+	gb.Start()
 }
