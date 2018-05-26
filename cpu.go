@@ -56,27 +56,19 @@ func (c *CPU) Reset(mmu *MMU) {
 	c.mmu = mmu
 }
 
-func (c *CPU) RunBootloader() {
-	var i uint16
-	cb := false
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		i = c.PC
-		argBytes := [2]uint8{0, 0}
-		if i < BLSIZE-2 {
-			argBytes = [2]uint8{c.bootloader[i+1], c.bootloader[i+2]}
-		} else if i < BLSIZE-1 {
-			argBytes = [2]uint8{c.bootloader[i+1], 0}
-		}
-
-		i, cb = c.Instruction(c.bootloader[i], i, argBytes, cb)
-		c.PC = i
-		reader.ReadString('\n')
+func (c *CPU) LoadCartridgeData(data []byte) {
+	for i, v := range data {
+		address := uint16(i)
+		c.mmu.WriteByte(address, v)
+	}
+	for i, v := range c.bootloader {
+		address := uint16(i)
+		c.mmu.WriteByte(address, v)
 	}
 }
 
 func (c *CPU) Start() {
-	c.RunBootloader()
+
 	reader := bufio.NewReader(os.Stdin)
 
 	var i uint16
@@ -102,6 +94,8 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 	var duration, shortDuration uint8
 	var jump bool
 	var jumpTo uint16
+	// breaking := false
+	breaking := true
 
 	if cbFlag {
 		name, length, duration = c.CBInstruction(opcode, location, argBytes[0])
@@ -215,8 +209,8 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 			name = "LD B,d8"
 			length = 2
 			duration = 8
-			address := uint16(argBytes[0])
-			c.B = c.mmu.ReadByte(address)
+			byte_ := argBytes[0]
+			c.B = byte_
 		case 0x0E:
 			name = "LD C,d8"
 			length = 2
@@ -366,7 +360,7 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 			if !c.getZeroFlag() {
 				jump = true
 				if arg > 127 {
-					jumpTo = location - (256 - arg)
+					jumpTo = location - (255 - arg) + 1
 				} else {
 					jumpTo = location + arg
 				}
@@ -385,6 +379,14 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 					jumpTo = location + arg
 				}
 			}
+		case 0xC3:
+			name = "JP a16"
+			length = 3
+			duration = 16
+			arg := u8PairToU16(argBytes)
+			fmt.Printf("%X \n", arg)
+			jump = true
+			jumpTo = arg
 
 			// Stack ops
 		case 0xC5:
@@ -421,6 +423,10 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 			jumpTo = u8PairToU16(argBytes)
 
 			// Misc
+		case 0x00:
+			name = "NOP"
+			length = 1
+			duration = 4
 		case 0xCB:
 			name = "CB Prefix"
 			length = 1
@@ -465,14 +471,17 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 			name = "Not implemented"
 			length = 1
 			duration = 1
+			breaking = true
 		}
 	}
 
 	// Logging
-	c.printInstruction(location, opcode, name, length, duration, shortDuration)
-	c.printRegisters()
-	c.printFlagRegister()
-	fmt.Println()
+	if breaking {
+		c.printInstruction(location, opcode, name, length, duration, shortDuration)
+		c.printRegisters()
+		c.printFlagRegister()
+		fmt.Println()
+	}
 
 	if !jump {
 		location += uint16(length)

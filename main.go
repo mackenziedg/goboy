@@ -9,6 +9,6 @@ func check(e error) {
 func main() {
 	var gb = &(GameBoy{})
 	gb.Reset()
-	// gb.LoadROMFromFile("./data/DMG_ROM.bin")
+	gb.LoadROMFromFile("./data/Tetris.gb")
 	gb.Start()
 }
