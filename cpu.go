@@ -57,9 +57,9 @@ func (c *CPU) Reset(mmu *MMU) {
 }
 
 func (c *CPU) LoadCartridgeData(data []byte) {
-	for i, v := range data {
+	for i := 0x0100; i < 0x8000; i++ {
 		address := uint16(i)
-		c.mmu.WriteByte(address, v)
+		c.mmu.WriteByte(address, data[i])
 	}
 	for i, v := range c.bootloader {
 		address := uint16(i)
@@ -68,12 +68,15 @@ func (c *CPU) LoadCartridgeData(data []byte) {
 }
 
 func (c *CPU) Start() {
-
 	reader := bufio.NewReader(os.Stdin)
 
 	var i uint16
 	cb := false
+	breaking := false
+	var insCount = 0
+
 	for {
+		insCount++
 		i = c.PC
 		argBytes := [2]uint8{0, 0}
 		if i < MEMORYSIZE-2 {
@@ -82,20 +85,124 @@ func (c *CPU) Start() {
 			argBytes = [2]uint8{c.mmu.ReadByte(i + 1), 0}
 		}
 
-		i, cb = c.Instruction(c.mmu.ReadByte(i), i, argBytes, cb)
+		i, cb, breaking = c.Instruction(c.mmu.ReadByte(i), i, argBytes, cb, breaking)
 		c.PC = i
-		reader.ReadString('\n')
+		if breaking {
+			reader.ReadString('\n')
+		}
 	}
 }
 
-func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFlag bool) (uint16, bool) {
+func (c *CPU) inc8(register *uint8) (uint8, uint8) {
+	var length uint8 = 1
+	var duration uint8 = 4
+	*register++
+	c.unsetSubtractionFlag()
+	if *register == 0 {
+		c.setZeroFlag()
+		c.setHalfCarryFlag()
+	}
+	return length, duration
+}
+
+func (c *CPU) dec8(register *uint8) (uint8, uint8) {
+	var length uint8 = 1
+	var duration uint8 = 4
+	*register--
+	c.setSubtractionFlag()
+	c.unsetZeroFlag()
+	if *register == 0 {
+		c.setZeroFlag()
+	} else if *register == 255 {
+		c.setHalfCarryFlag()
+	}
+	return length, duration
+}
+
+// pass low, high
+func (c *CPU) inc16(lowReg, hiReg *uint8) (uint8, uint8) {
+	var length uint8 = 1
+	var duration uint8 = 8
+	combined := u8PairToU16([2]uint8{*lowReg, *hiReg})
+	combined++
+	vals := splitUint16(combined)
+	*lowReg = vals[0]
+	*hiReg = vals[1]
+	return length, duration
+}
+
+// pass low, high
+func (c *CPU) dec16(lowReg, hiReg *uint8) (uint8, uint8) {
+	var length uint8 = 1
+	var duration uint8 = 8
+	combined := u8PairToU16([2]uint8{*lowReg, *hiReg})
+	combined--
+	vals := splitUint16(combined)
+	*lowReg = vals[0]
+	*hiReg = vals[1]
+	return length, duration
+}
+
+func (c *CPU) ldByte(register *uint8, byte_ uint8) (uint8, uint8) {
+	var length uint8 = 2
+	var duration uint8 = 8
+	*register = byte_
+	return length, duration
+}
+
+func (c *CPU) ldWord(lowReg, hiReg *uint8, word [2]uint8) (uint8, uint8) {
+	var length uint8 = 3
+	var duration uint8 = 12
+	*lowReg = word[1]
+	*hiReg = word[0]
+	return length, duration
+}
+
+func (c *CPU) ldReg8(to *uint8, from *uint8) (uint8, uint8) {
+	var length uint8 = 1
+	var duration uint8 = 4
+	*to = *from
+	return length, duration
+}
+
+func (c *CPU) ldReg8Adr(register *uint8, address uint16) (uint8, uint8) {
+	var length uint8 = 1
+	var duration uint8 = 8
+	*register = c.mmu.ReadByte(address)
+	return length, duration
+}
+
+func (c *CPU) ldHLA() (uint8, uint8) {
+	var length uint8 = 1
+	var duration uint8 = 8
+	address := u8PairToU16([2]uint8{c.L, c.H})
+	c.mmu.WriteByte(address, c.A)
+	return length, duration
+}
+
+func (c *CPU) subReg(register *uint8) (uint8, uint8) {
+	var length uint8 = 1
+	var duration uint8 = 4
+	c.setSubtractionFlag()
+	c.unsetCarryFlag()
+	c.unsetHalfCarryFlag()
+	c.unsetZeroFlag()
+	if c.A < *register {
+		c.setCarryFlag()
+		c.setHalfCarryFlag()
+	} else if c.A == *register {
+		c.setZeroFlag()
+	}
+	c.A -= *register
+	return length, duration
+}
+
+func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFlag bool, breaking bool) (uint16, bool, bool) {
 	var name string
 	var length uint8
 	var duration, shortDuration uint8
 	var jump bool
 	var jumpTo uint16
-	// breaking := false
-	breaking := true
 
 	if cbFlag {
 		name, length, duration = c.CBInstruction(opcode, location, argBytes[0])
@@ -107,190 +214,82 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 		// INC/DEC
 		case 0x04:
 			name = "INC B"
-			length = 1
-			duration = 4
-			c.B += 1
-			c.unsetSubtractionFlag()
-			if c.B == 0 {
-				c.setZeroFlag()
-				c.setHalfCarryFlag()
-			}
+			length, duration = c.inc8(&c.B)
 		case 0x05:
 			name = "DEC B"
-			length = 1
-			duration = 4
-			c.B -= 1
-			c.setSubtractionFlag()
-			c.unsetZeroFlag()
-			if c.B == 0 {
-				c.setZeroFlag()
-			} else if c.B == 255 {
-				c.setHalfCarryFlag()
-			}
+			length, duration = c.dec8(&c.B)
 		case 0x0C:
 			name = "INC C"
-			length = 1
-			duration = 4
-			c.C += 1
-			c.unsetSubtractionFlag()
-			if c.C == 0 {
-				c.setZeroFlag()
-				c.setHalfCarryFlag()
-			}
+			length, duration = c.inc8(&c.C)
 		case 0x0D:
 			name = "DEC C"
-			length = 1
-			duration = 4
-			c.setSubtractionFlag()
-			c.unsetZeroFlag()
-			if c.C == 0 {
-				c.setZeroFlag()
-			} else if c.C == 255 {
-				c.setHalfCarryFlag()
-			}
+			length, duration = c.dec8(&c.C)
 		case 0x15:
 			name = "DEC D"
-			length = 1
-			duration = 4
-			c.setSubtractionFlag()
-			if c.D == 0 {
-				c.setZeroFlag()
-			} else if c.D == 255 {
-				c.setHalfCarryFlag()
-			}
+			length, duration = c.dec8(&c.D)
 		case 0x1D:
 			name = "DEC E"
-			length = 1
-			duration = 4
-			c.setSubtractionFlag()
-			if c.E == 0 {
-				c.setZeroFlag()
-			} else if c.E == 255 {
-				c.setHalfCarryFlag()
-			}
+			length, duration = c.dec8(&c.E)
 		case 0x24:
 			name = "INC H"
-			length = 1
-			duration = 4
-			c.H += 1
-			c.unsetSubtractionFlag()
-			if c.H == 0 {
-				c.setZeroFlag()
-				c.setHalfCarryFlag()
-			}
+			length, duration = c.inc8(&c.H)
+		case 0x2C:
+			name = "INC L"
+			length, duration = c.inc8(&c.L)
 
 		case 0x13:
 			name = "INC DE"
-			length = 1
-			duration = 8
-			combined := u8PairToU16([2]uint8{c.E, c.D})
-			combined += 1
-			vals := splitUint16(combined)
-			c.D = vals[1]
-			c.E = vals[0]
+			length, duration = c.inc16(&c.E, &c.D)
 		case 0x23:
 			name = "INC HL"
-			length = 1
-			duration = 8
-			combined := u8PairToU16([2]uint8{c.L, c.H})
-			combined += 1
-			vals := splitUint16(combined)
-			c.H = vals[1]
-			c.L = vals[0]
+			length, duration = c.inc16(&c.L, &c.H)
 
 			// LD R,d8
 		case 0x3E:
 			name = "LD A,d8"
-			length = 2
-			duration = 8
-			byte_ := argBytes[0]
-			c.A = byte_
+			length, duration = c.ldByte(&c.A, argBytes[0])
 		case 0x06:
 			name = "LD B,d8"
-			length = 2
-			duration = 8
-			byte_ := argBytes[0]
-			c.B = byte_
+			length, duration = c.ldByte(&c.B, argBytes[0])
 		case 0x0E:
 			name = "LD C,d8"
-			length = 2
-			duration = 8
-			byte_ := argBytes[0]
-			c.C = byte_
+			length, duration = c.ldByte(&c.C, argBytes[0])
 		case 0x16:
 			name = "LD D,d8"
-			length = 2
-			duration = 8
-			address := uint16(argBytes[0])
-			c.D = c.mmu.ReadByte(address)
+			length, duration = c.ldByte(&c.D, argBytes[0])
 		case 0x1E:
 			name = "LD E,d8"
-			length = 2
-			duration = 8
-			address := uint16(argBytes[0])
-			c.E = c.mmu.ReadByte(address)
+			length, duration = c.ldByte(&c.E, argBytes[0])
 
 			// LD R,R
 		case 0x4F:
 			name = "LD C,A"
-			length = 1
-			duration = 4
-			c.C = c.A
+			length, duration = c.ldReg8(&c.C, &c.A)
 		case 0x7B:
 			name = "LD A,E"
-			length = 1
-			duration = 4
-			c.A = c.E
+			length, duration = c.ldReg8(&c.A, &c.E)
 
 			// LD R,a16
 		case 0x1A:
 			name = "LD A,(DE)"
-			length = 1
-			duration = 8
-			address := u8PairToU16([2]uint8{c.E, c.D})
-			c.A = c.mmu.ReadByte(address)
+			length, duration = c.ldReg8Adr(&c.A, u8PairToU16([2]uint8{c.E, c.D}))
 
 			// LD RR,d16
 		case 0x11:
 			name = "LD DE,d16"
-			length = 3
-			duration = 12
-			c.E = argBytes[0]
-			c.D = argBytes[1]
+			length, duration = c.ldWord(&c.E, &c.D, argBytes)
 		case 0x21:
 			name = "LD HL,d16"
-			length = 3
-			duration = 12
-			c.L = argBytes[0]
-			c.H = argBytes[1]
+			length, duration = c.ldWord(&c.L, &c.H, argBytes)
+
 		case 0x32:
 			name = "LD (HL-),A"
-			length = 1
-			duration = 8
-			address := u8PairToU16([2]uint8{c.L, c.H})
-			c.mmu.WriteByte(address, c.A)
-			combined := u8PairToU16([2]uint8{c.L, c.H})
-			combined -= 1
-			vals := splitUint16(combined)
-			c.H = vals[1]
-			c.L = vals[0]
-			c.setSubtractionFlag()
-			if combined == 0 {
-				c.setZeroFlag()
-			} else if combined == 65535 {
-				c.setCarryFlag()
-			}
+			length, duration = c.ldHLA()
+			_, _ = c.dec16(&c.L, &c.H)
 		case 0x22:
 			name = "LD (HL+),A"
-			length = 1
-			duration = 8
-			address := u8PairToU16([2]uint8{c.L, c.H})
-			c.mmu.WriteByte(address, c.A)
-			combined := u8PairToU16([2]uint8{c.L, c.H})
-			combined += 1
-			vals := splitUint16(combined)
-			c.H = vals[1]
-			c.L = vals[0]
+			length, duration = c.ldHLA()
+			_, _ = c.inc16(&c.L, &c.H)
 		case 0x31:
 			name = "LD SP,d16"
 			length = 3
@@ -307,11 +306,8 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 			c.mmu.WriteByte(address, c.A)
 			length = 1 // Change later when figure out wtf
 		case 0x77:
-			name = "LD (HL), A"
-			length = 1
-			duration = 8
-			address := u8PairToU16([2]uint8{c.L, c.H})
-			c.mmu.WriteByte(address, c.A)
+			name = "LD (HL),A"
+			length, duration = c.ldHLA()
 		case 0xE0:
 			name = "LDH (a8),A"
 			length = 2
@@ -384,7 +380,6 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 			length = 3
 			duration = 16
 			arg := u8PairToU16(argBytes)
-			fmt.Printf("%X \n", arg)
 			jump = true
 			jumpTo = arg
 
@@ -412,6 +407,7 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 			shortDuration = 8
 			jump = true
 			c.SP += 2
+			fmt.Printf("Returning to: %X \n", c.mmu.ReadWord(c.SP))
 			jumpTo = c.mmu.ReadWord(c.SP)
 		case 0xCD:
 			name = "CALL a16"
@@ -434,6 +430,28 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 			cbFlag = true
 
 			// Arithmetic
+		case 0x95:
+			name = "SUB L"
+			length, duration = c.subReg(&c.L)
+
+		case 0x96:
+			name = "SUB (HL)"
+			length = 1
+			duration = 8
+			address := u8PairToU16([2]uint8{c.L, c.H})
+			sub := c.mmu.ReadByte(address)
+			c.setSubtractionFlag()
+			c.unsetCarryFlag()
+			c.unsetHalfCarryFlag()
+			c.unsetZeroFlag()
+			if c.A < sub {
+				c.setCarryFlag()
+				c.setHalfCarryFlag()
+			} else if c.A == sub {
+				c.setZeroFlag()
+			}
+			c.A -= sub
+
 		case 0xAF:
 			name = "XOR A"
 			length = 1
@@ -472,6 +490,10 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 			length = 1
 			duration = 1
 			breaking = true
+			for i := 0x8000; i < 0x97FF; i++ {
+				fmt.Printf("%X ", c.mmu.ReadByte(uint16(i)))
+			}
+			fmt.Println()
 		}
 	}
 
@@ -488,7 +510,7 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 	} else {
 		location = jumpTo
 	}
-	return location, cbFlag
+	return location, cbFlag, breaking
 }
 
 func (c *CPU) CBInstruction(opcode uint8, location uint16, argByte uint8) (string, uint8, uint8) {
@@ -504,9 +526,9 @@ func (c *CPU) CBInstruction(opcode uint8, location uint16, argByte uint8) (strin
 		c.unsetSubtractionFlag()
 		c.setHalfCarryFlag()
 		if c.checkBit(c.H, 7) {
-			c.setZeroFlag()
-		} else {
 			c.unsetZeroFlag()
+		} else {
+			c.setZeroFlag()
 		}
 	case 0x11:
 		name = "RL C"
@@ -592,8 +614,9 @@ func (c *CPU) printInstruction(location uint16, opcode uint8, name string, lengt
 }
 
 func (c *CPU) printRegisters() {
-	fmt.Printf("\tStack pointer: %X\n\t\tA: %X, B: %X, C: %X, D: %X, E: %X, H: %X, L: %X\n",
+	fmt.Printf("\tStack pointer: %X ($%X) \n\t\tA: %X, B: %X, C: %X, D: %X, E: %X, H: %X, L: %X\n",
 		c.SP,
+		c.mmu.ReadWord(c.SP),
 		c.A,
 		c.B,
 		c.C,

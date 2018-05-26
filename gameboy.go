@@ -15,15 +15,18 @@ type GameBoy struct {
 	cpu *CPU
 	mmu *MMU
 	gpu *GPU
+	apu *APU
 }
 
 func (g *GameBoy) Reset() {
 	g.cpu = &(CPU{})
 	g.mmu = &(MMU{})
 	g.gpu = &(GPU{})
+	g.apu = &(APU{})
 
 	g.cpu.Reset(g.mmu)
 	g.gpu.Reset(g.mmu)
+	g.apu.Reset(g.mmu)
 	g.mmu.Reset()
 }
 

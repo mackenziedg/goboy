@@ -1,5 +1,7 @@
 package main
 
+import "math/rand"
+
 const MEMORYSIZE = 0x10000
 
 type MMU struct {
@@ -8,6 +10,9 @@ type MMU struct {
 
 func (m *MMU) Reset() {
 	m.memory = [MEMORYSIZE]uint8{}
+	for i, _ := range m.memory {
+		m.memory[i] = uint8(rand.Intn(0x100))
+	}
 }
 
 func (m *MMU) ReadByte(address uint16) uint8 {
