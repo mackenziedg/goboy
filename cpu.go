@@ -64,12 +64,12 @@ func (c *CPU) RunBootloader() {
 		i = c.PC
 		argBytes := [2]uint8{0, 0}
 		if i < BLSIZE-2 {
-			argBytes = splitUint16(c.mmu.ReadWord(i + 1))
+			argBytes = [2]uint8{c.bootloader[i+1], c.bootloader[i+2]}
 		} else if i < BLSIZE-1 {
-			argBytes = [2]uint8{c.mmu.ReadByte(i + 1), 0}
+			argBytes = [2]uint8{c.bootloader[i+1], 0}
 		}
 
-		i, cb = c.Instruction(c.mmu.ReadByte(i), i, argBytes, cb)
+		i, cb = c.Instruction(c.bootloader[i], i, argBytes, cb)
 		c.PC = i
 		reader.ReadString('\n')
 	}
