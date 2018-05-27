@@ -6,3 +6,7 @@ type GPU struct {
 
 func (g *GPU) Reset(mmu *MMU) {
 }
+
+func (g *GPU) LoadTile(address uint16) {
+
+}

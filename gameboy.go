@@ -5,12 +5,8 @@ import (
 	"io/ioutil"
 )
 
-type gb interface {
-	Reset()
-	LoadROMFromFile(path string)
-	Start()
-}
-
+// GameBoy is a wrapper for the hardware components.
+// It controls the timing and linkage between the components.
 type GameBoy struct {
 	cpu *CPU
 	mmu *MMU
@@ -18,6 +14,7 @@ type GameBoy struct {
 	apu *APU
 }
 
+// Reset() creates new hardware, links the memory to the processors, and resets each component.
 func (g *GameBoy) Reset() {
 	g.cpu = &(CPU{})
 	g.mmu = &(MMU{})
@@ -30,6 +27,8 @@ func (g *GameBoy) Reset() {
 	g.mmu.Reset()
 }
 
+// LoadROMFromFile() loads a binary gameboy data file from a filepath string.
+// Panics if any file read errors occur.
 func (g *GameBoy) LoadROMFromFile(path string) {
 	dat, err := ioutil.ReadFile(path)
 	check(err)
@@ -37,11 +36,12 @@ func (g *GameBoy) LoadROMFromFile(path string) {
 
 	g.Reset()
 
-	g.cpu.LoadCartridgeData(dat)
+	g.mmu.LoadCartridgeData(dat)
 	g.Start()
 }
 
-func (g *GameBoy) Start() (func(), *MMU) {
-	stepper := g.cpu.Stepper()
-	return stepper, g.mmu
+// Starts the GameBoy. Returns a function which steps the CPU by one.
+func (g *GameBoy) Start() func() {
+	stepper := g.cpu.Start()
+	return stepper
 }
