@@ -41,6 +41,7 @@ func (g *GameBoy) LoadROMFromFile(path string) {
 	g.Start()
 }
 
-func (g *GameBoy) Start() {
-	g.cpu.Start()
+func (g *GameBoy) Start() (func(), *MMU) {
+	stepper := g.cpu.Stepper()
+	return stepper, g.mmu
 }

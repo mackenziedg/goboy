@@ -67,7 +67,7 @@ func (c *CPU) LoadCartridgeData(data []byte) {
 	}
 }
 
-func (c *CPU) Start() {
+func (c *CPU) Stepper() func() {
 	reader := bufio.NewReader(os.Stdin)
 
 	var i uint16
@@ -75,7 +75,7 @@ func (c *CPU) Start() {
 	breaking := false
 	var insCount = 0
 
-	for {
+	return func() {
 		insCount++
 		i = c.PC
 		argBytes := [2]uint8{0, 0}
@@ -407,7 +407,7 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 			shortDuration = 8
 			jump = true
 			c.SP += 2
-			fmt.Printf("Returning to: %X \n", c.mmu.ReadWord(c.SP))
+			// fmt.Printf("Returning to: %X \n", c.mmu.ReadWord(c.SP))
 			jumpTo = c.mmu.ReadWord(c.SP)
 		case 0xCD:
 			name = "CALL a16"
@@ -490,10 +490,10 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 			length = 1
 			duration = 1
 			breaking = true
-			for i := 0x8000; i < 0x97FF; i++ {
-				fmt.Printf("%X ", c.mmu.ReadByte(uint16(i)))
-			}
-			fmt.Println()
+			// for i := 0x8000; i < 0x97FF; i++ {
+			// 	fmt.Printf("%X ", c.mmu.ReadByte(uint16(i)))
+			// }
+			// fmt.Println()
 		}
 	}
 
