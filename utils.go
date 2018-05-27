@@ -14,3 +14,11 @@ func splitUint16(num uint16) [2]uint8 {
 	higher := uint8((num & 0xFF00) >> 8)
 	return [2]uint8{lower, higher}
 }
+
+func checkBit(value uint8, bit uint8) bool {
+	return (value & bitVal(bit)) == bitVal(bit)
+}
+
+func bitVal(bit uint8) uint8 {
+	return (1 << bit)
+}

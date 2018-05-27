@@ -320,7 +320,7 @@ func (c *CPU) Instruction(opcode uint8, location uint16, argBytes [2]uint8, cbFl
 			length = 1
 			duration = 4
 			toCarry := false
-			if c.checkBit(c.A, 7) {
+			if checkBit(c.A, 7) {
 				toCarry = true
 			}
 			c.A = bits.RotateLeft8(c.A, 9)
@@ -525,7 +525,7 @@ func (c *CPU) CBInstruction(opcode uint8, location uint16, argByte uint8) (strin
 		duration = 8
 		c.unsetSubtractionFlag()
 		c.setHalfCarryFlag()
-		if c.checkBit(c.H, 7) {
+		if checkBit(c.H, 7) {
 			c.unsetZeroFlag()
 		} else {
 			c.setZeroFlag()
@@ -535,7 +535,7 @@ func (c *CPU) CBInstruction(opcode uint8, location uint16, argByte uint8) (strin
 		length = 2
 		duration = 8
 		toCarry := false
-		if c.checkBit(c.C, 7) {
+		if checkBit(c.C, 7) {
 			toCarry = true
 		}
 		c.C = bits.RotateLeft8(c.C, 9)
@@ -554,59 +554,51 @@ func (c *CPU) CBInstruction(opcode uint8, location uint16, argByte uint8) (strin
 }
 
 func (c *CPU) setZeroFlag() {
-	c.F |= c.bitVal(Z)
+	c.F |= bitVal(Z)
 }
 
 func (c *CPU) unsetZeroFlag() {
-	c.F &^= c.bitVal(Z)
+	c.F &^= bitVal(Z)
 }
 
 func (c *CPU) setSubtractionFlag() {
-	c.F |= c.bitVal(N)
+	c.F |= bitVal(N)
 }
 
 func (c *CPU) unsetSubtractionFlag() {
-	c.F &^= c.bitVal(N)
+	c.F &^= bitVal(N)
 }
 
 func (c *CPU) setCarryFlag() {
-	c.F |= c.bitVal(C)
+	c.F |= bitVal(C)
 }
 
 func (c *CPU) unsetCarryFlag() {
-	c.F &^= c.bitVal(C)
+	c.F &^= bitVal(C)
 }
 
 func (c *CPU) setHalfCarryFlag() {
-	c.F |= c.bitVal(H)
+	c.F |= bitVal(H)
 }
 
 func (c *CPU) unsetHalfCarryFlag() {
-	c.F &^= c.bitVal(H)
+	c.F &^= bitVal(H)
 }
 
 func (c *CPU) getZeroFlag() bool {
-	return c.checkBit(c.F, Z)
+	return checkBit(c.F, Z)
 }
 
 func (c *CPU) getSubtractionFlag() bool {
-	return c.checkBit(c.F, N)
+	return checkBit(c.F, N)
 }
 
 func (c *CPU) getHalfCarryFlag() bool {
-	return c.checkBit(c.F, H)
+	return checkBit(c.F, H)
 }
 
 func (c *CPU) getCarryFlag() bool {
-	return c.checkBit(c.F, C)
-}
-
-func (c *CPU) checkBit(value uint8, bit uint8) bool {
-	return (value & c.bitVal(bit)) == c.bitVal(bit)
-}
-
-func (c *CPU) bitVal(bit uint8) uint8 {
-	return (1 << bit)
+	return checkBit(c.F, C)
 }
 
 func (c *CPU) printInstruction(location uint16, opcode uint8, name string, length, duration, shortDuration uint8) {
