@@ -88,7 +88,7 @@ func (g *GameBoy) LoadROMFromFile(path string) {
 	fmt.Printf("Loading %s.\n", pathSplit[len(pathSplit)-1])
 	dat, err := ioutil.ReadFile(path)
 	check(err)
-	fmt.Printf("Data is %d bytes long.\n", len(dat))
+	fmt.Printf("Loaded 0x%X bytes of data.\n", len(dat))
 
 	g.Reset()
 
