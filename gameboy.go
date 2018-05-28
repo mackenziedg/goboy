@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
-	"time"
+	"strings"
 )
 
 // GameBoy is a wrapper for the hardware components.
@@ -31,30 +31,37 @@ func (g *GameBoy) Reset() {
 // LoadROMFromFile() loads a binary gameboy data file from a filepath string.
 // Panics if any file read errors occur.
 func (g *GameBoy) LoadROMFromFile(path string) {
+	pathSplit := strings.Split(path, ",")
+	fmt.Printf("Loading %s.\n", pathSplit[len(pathSplit)-1])
 	dat, err := ioutil.ReadFile(path)
 	check(err)
-	fmt.Printf("Data is %d bytes long.\n\n", len(dat))
+	fmt.Printf("Data is %d bytes long.\n", len(dat))
 
 	g.Reset()
 
 	g.mmu.LoadCartridgeData(dat)
+	titleBytes := g.mmu.memory[0x0134:0x0142]
+
+	fmt.Print("Now playing ")
+	for _, v := range titleBytes {
+		if v != 0x0 {
+			fmt.Printf("%c", v)
+		}
+	}
+	fmt.Print("!\n")
 	g.Start()
 }
 
 // Starts the GameBoy. Returns a function which steps the CPU by one.
 func (g *GameBoy) Start() {
-	stepper := g.cpu.Start()
+	cpuStepper := g.cpu.Start()
+	lcdStepper := g.lcd.Start()
 
-	go func() {
-		i := uint64(0)
-		for {
-			d := stepper()
-
-			timeDelay := time.Duration(d) * 510
-			time.Sleep(timeDelay * time.Nanosecond)
-			i++
-		}
-	}()
-	fmt.Scanln()
+	i := uint64(0)
+	for {
+		i++
+		cpuStepper()
+		lcdStepper()
+	}
 
 }
