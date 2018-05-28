@@ -32,13 +32,12 @@ type CPU struct {
 }
 
 type Instruction struct {
-	name          string
-	location      uint16
-	arg           uint16
-	opcode        uint8
-	length        uint8
-	duration      uint8
-	shortDuration uint8
+	name     string
+	location uint16
+	arg      uint16
+	opcode   uint8
+	length   uint8
+	duration uint8
 }
 
 type Register struct {
@@ -232,7 +231,7 @@ func (c *CPU) OrReg(register *uint8) (uint8, uint8) {
 }
 
 // Start writes the bootloader data into the 0x100-0xFFF range of the MMU and returns a stepping function.
-// This function takes one CPU step each time it is called.
+// This function takes one CPU step each time it is called and returns the duration of the processed step.
 func (c *CPU) Start() func() uint8 {
 	for i, v := range c.bootloader {
 		address := uint16(i)
@@ -258,14 +257,14 @@ func (c *CPU) Start() func() uint8 {
 	}
 }
 
-// Instruction executes one instruction, depending on the location, arguments, and if the previous byte was 0xCB.
+// Instruction executes one instruction, depending on if the previous byte was 0xCB.
 // If breaking = true, the instruction and register data will be printed.
 // Returns the current Instruction, cbFlag if the byte is 0xCB, and whether to begin breaking.
 func (c *CPU) Instruction(opcode uint8, cbFlag bool, breaking bool) (Instruction, bool, bool) {
 	var name string
 	var length uint8
 	var location = c.PC.word
-	var duration, shortDuration uint8
+	var duration uint8
 	var jump bool
 	var jumpTo uint16
 
@@ -606,11 +605,11 @@ func (c *CPU) Instruction(opcode uint8, cbFlag bool, breaking bool) (Instruction
 		case 0x20:
 			name = "JR NZ,r8"
 			length = 2
-			duration = 12
-			shortDuration = 8
+			duration = 8
 			arg := uint16(c.mmu.ReadByte(c.PC.word + 1))
 			if !c.GetZeroFlag() {
 				jump = true
+				duration = 12
 				if arg > 127 {
 					jumpTo = c.PC.word - (255 - arg) + 1
 				} else {
@@ -620,11 +619,11 @@ func (c *CPU) Instruction(opcode uint8, cbFlag bool, breaking bool) (Instruction
 		case 0x28:
 			name = "JR Z,r8"
 			length = 2
-			duration = 12
-			shortDuration = 8
+			duration = 8
 			arg := uint16(c.mmu.ReadByte(c.PC.word + 1))
 			if c.GetZeroFlag() {
 				jump = true
+				duration = 12
 				if arg > 127 {
 					jumpTo = c.PC.word - (255 - arg) + 1
 				} else {
@@ -654,8 +653,7 @@ func (c *CPU) Instruction(opcode uint8, cbFlag bool, breaking bool) (Instruction
 		case 0xC9:
 			name = "RET"
 			length = 1
-			duration = 20
-			shortDuration = 8
+			duration = 16
 			jump = true
 			c.SP.word += 2
 			jumpTo = c.mmu.ReadWord(c.SP.word)
@@ -948,7 +946,7 @@ func (c *CPU) Instruction(opcode uint8, cbFlag bool, breaking bool) (Instruction
 	} else {
 		c.PC.word = jumpTo
 	}
-	return Instruction{name, location, arg, opcode, length, duration, shortDuration}, cbFlag, breaking
+	return Instruction{name, location, arg, opcode, length, duration}, cbFlag, breaking
 }
 
 // CBInstruction processes an instruction in the same manner as Instruction. It is called if the previous byte is 0xCB.
@@ -1053,9 +1051,9 @@ func (c *CPU) GetCarryFlag() bool {
 	return CheckBit(c.AF.lo, C)
 }
 
-// PrintInstruction prints the byte location, opcode, opcode name, length, duration, and shortDuration of the passed instruction.
+// PrintInstruction prints the byte location, opcode, opcode name, length, and duration of the passed instruction.
 func (c *CPU) PrintInstruction(insCount uint64, i Instruction) {
-	fmt.Printf("Step %d, Byte %X\n\t%X|%s $%X: length: %d, duration: %d/%d\n", insCount, i.location, i.opcode, i.name, i.arg, i.length, i.duration, i.shortDuration)
+	fmt.Printf("Step %d, Byte %X\n\t%X|%s $%X: length: %d, duration: %d/%d\n", insCount, i.location, i.opcode, i.name, i.arg, i.length, i.duration)
 }
 
 // PrintRegisters prints the stack pointer location and data, and the values in each register except the flag register.
