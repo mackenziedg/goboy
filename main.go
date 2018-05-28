@@ -13,10 +13,5 @@ func main() {
 	gb.LoadROMFromFile("./data/Tetris.gb")
 
 	// Start the gameboy
-	GBStep := gb.Start()
-
-	// Process instructions
-	for {
-		GBStep()
-	}
+	gb.Start()
 }

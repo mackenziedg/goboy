@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mackenziedg/utils"
@@ -20,7 +21,7 @@ func TestCPU(t *testing.T) {
 	for i := 0; i < 0x100; i++ {
 
 		if !nonExistent.Contains(uint8(i)) {
-			_, _, breaking := cpu.Instruction(uint8(i), 0, [2]uint8{}, false, false)
+			_, _, breaking := cpu.Instruction(uint8(i), false, false)
 			if breaking {
 				notImplemented = append(notImplemented, uint8(i))
 			}
@@ -29,8 +30,12 @@ func TestCPU(t *testing.T) {
 	}
 	if len(notImplemented) != 0 {
 		t.Errorf("The following opcodes have not been implemented:\n")
-		for _, v := range notImplemented {
-			t.Errorf("%X, ", v)
+		formatStr := strings.Repeat("%X, ", len(notImplemented))
+		tmp := make([]interface{}, len(notImplemented))
+		for i, val := range notImplemented {
+			tmp[i] = val
 		}
+		t.Skipf(formatStr, tmp...)
 	}
+
 }

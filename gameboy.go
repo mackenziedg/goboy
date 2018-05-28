@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
+	"time"
 )
 
 // GameBoy is a wrapper for the hardware components.
@@ -10,7 +11,7 @@ import (
 type GameBoy struct {
 	cpu *CPU
 	mmu *MMU
-	gpu *GPU
+	lcd *LCD
 	apu *APU
 }
 
@@ -18,11 +19,11 @@ type GameBoy struct {
 func (g *GameBoy) Reset() {
 	g.cpu = &(CPU{})
 	g.mmu = &(MMU{})
-	g.gpu = &(GPU{})
+	g.lcd = &(LCD{})
 	g.apu = &(APU{})
 
 	g.cpu.Reset(g.mmu)
-	g.gpu.Reset(g.mmu)
+	g.lcd.Reset(g.mmu)
 	g.apu.Reset(g.mmu)
 	g.mmu.Reset()
 }
@@ -41,7 +42,19 @@ func (g *GameBoy) LoadROMFromFile(path string) {
 }
 
 // Starts the GameBoy. Returns a function which steps the CPU by one.
-func (g *GameBoy) Start() func() {
+func (g *GameBoy) Start() {
 	stepper := g.cpu.Start()
-	return stepper
+
+	go func() {
+		i := uint64(0)
+		for {
+			d := stepper()
+
+			timeDelay := time.Duration(d) * 510
+			time.Sleep(timeDelay * time.Nanosecond)
+			i++
+		}
+	}()
+	fmt.Scanln()
+
 }

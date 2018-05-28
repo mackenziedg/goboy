@@ -19,8 +19,8 @@ func U16ToU8Pair(num uint16) [2]uint8 {
 
 // CheckBit returns true if the bit of value is 1.
 // Eg. CheckBit(0b10, 1) == true, CheckBit(0b10, 0) == false
-func CheckBit(value uint8, bit uint8) bool {
-	return (value & BitVal(bit)) == BitVal(bit)
+func CheckBit(value *uint8, bit uint8) bool {
+	return (*value & BitVal(bit)) == BitVal(bit)
 }
 
 // BitVal returns the value of the bit-th bit.
