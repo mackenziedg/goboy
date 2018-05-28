@@ -18,14 +18,14 @@ func TestCPU(t *testing.T) {
 		nonExistent.Add(v)
 	}
 
+	in := true
 	for i := 0; i < 0x100; i++ {
 
 		if !nonExistent.Contains(uint8(i)) {
-			_, _, breaking := cpu.Instruction(uint8(i), false, false)
-			if breaking {
+			_, in = cpu.opcodeMap[uint8(i)]
+			if !in {
 				notImplemented = append(notImplemented, uint8(i))
 			}
-			breaking = false
 		}
 	}
 	if len(notImplemented) != 0 {

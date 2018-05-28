@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/bits"
+	"time"
 	"unsafe"
 )
 
@@ -28,9 +29,16 @@ type CPU struct {
 
 	mmu *MMU
 
+	opcodeMap   map[uint8]func() string
+	cbOpcodeMap map[uint8]func() string
+
 	bootloader [0x100]byte
+	cycles     uint64
+
+	breaking bool
 }
 
+// Only used for printing instruction information
 type Instruction struct {
 	name     string
 	location uint16
@@ -40,13 +48,15 @@ type Instruction struct {
 	duration uint8
 }
 
+// Stupid bithacking used to have the hi and lo values be the
+// high and low bytes of word so changing any will affect the other automatically
 type Register struct {
 	hi   *uint8
 	lo   *uint8
 	word uint16
 }
 
-// Reset links a new MMU to the CPU, clears the registers, and loads in the bootloader data from a file.
+// Reset links a new MMU to the CPU, clears the registers, sets up the opcode maps, and loads in the bootloader data from a file.
 func (c *CPU) Reset(mmu *MMU) {
 	dat, err := ioutil.ReadFile("./data/DMG_ROM.bin")
 	check(err)
@@ -75,23 +85,833 @@ func (c *CPU) Reset(mmu *MMU) {
 	c.PC.word = 0x0
 
 	c.mmu = mmu
+
+	c.SetupOpcodeMap()
+}
+
+// Fill in the opcodeMap and cbOpcodeMap
+func (c *CPU) SetupOpcodeMap() {
+
+	// INC/DEC
+	c.opcodeMap = make(map[uint8]func() string)
+	c.opcodeMap[0x3C] = func() string {
+		c.Inc8(c.AF.hi)
+		return "INC A"
+	}
+	c.opcodeMap[0x3D] = func() string {
+		c.Dec8(c.AF.hi)
+		return "DEC A"
+	}
+	c.opcodeMap[0x04] = func() string {
+		c.Inc8(c.BC.hi)
+		return "INC B"
+	}
+	c.opcodeMap[0x05] = func() string {
+		c.Dec8(c.BC.hi)
+		return "DEC B"
+	}
+	c.opcodeMap[0x0C] = func() string {
+		c.Inc8(c.BC.lo)
+		return "INC C"
+	}
+	c.opcodeMap[0x0D] = func() string {
+		c.Dec8(c.BC.lo)
+		return "DEC C"
+	}
+	c.opcodeMap[0x14] = func() string {
+		c.Inc8(c.DE.hi)
+		return "INC D"
+	}
+	c.opcodeMap[0x15] = func() string {
+		c.Dec8(c.DE.hi)
+		return "DEC D"
+	}
+	c.opcodeMap[0x1C] = func() string {
+		c.Inc8(c.DE.lo)
+		return "INC E"
+	}
+	c.opcodeMap[0x1D] = func() string {
+		c.Dec8(c.DE.lo)
+		return "DEC E"
+	}
+	c.opcodeMap[0x24] = func() string {
+		c.Inc8(c.HL.hi)
+		return "INC H"
+	}
+	c.opcodeMap[0x25] = func() string {
+		c.Dec8(c.HL.hi)
+		return "DEC H"
+	}
+	c.opcodeMap[0x2C] = func() string {
+		c.Inc8(c.HL.lo)
+		return "INC L"
+	}
+	c.opcodeMap[0x2D] = func() string {
+		c.Inc8(c.HL.lo)
+		return "DEC L"
+	}
+	c.opcodeMap[0x03] = func() string {
+		c.Inc16(&c.BC.word)
+		return "INC BC"
+	}
+	c.opcodeMap[0x0B] = func() string {
+		c.Dec16(&c.BC.word)
+		return "DEC BC"
+	}
+	c.opcodeMap[0x13] = func() string {
+		c.Inc16(&c.DE.word)
+		return "INC DE"
+	}
+	c.opcodeMap[0x1B] = func() string {
+		c.Dec16(&c.DE.word)
+		return "DEC DE"
+	}
+	c.opcodeMap[0x23] = func() string {
+		c.Inc16(&c.HL.word)
+		return "INC HL"
+	}
+	c.opcodeMap[0x2B] = func() string {
+		c.Dec16(&c.HL.word)
+		return "DEC HL"
+	}
+
+	// LD R,d8
+	c.opcodeMap[0x3E] = func() string {
+		c.LdByte(c.AF.hi)
+		return "LD A,d8"
+	}
+	c.opcodeMap[0x06] = func() string {
+		c.LdByte(c.BC.hi)
+		return "LD B,d8"
+	}
+	c.opcodeMap[0x0E] = func() string {
+		c.LdByte(c.BC.lo)
+		return "LD C,d8"
+	}
+	c.opcodeMap[0x16] = func() string {
+		c.LdByte(c.DE.hi)
+		return "LD D,d8"
+	}
+	c.opcodeMap[0x1E] = func() string {
+		c.LdByte(c.DE.lo)
+		return "LD E,d8"
+	}
+	c.opcodeMap[0x26] = func() string {
+		c.LdByte(c.HL.hi)
+		return "LD H,d8"
+	}
+	c.opcodeMap[0x2E] = func() string {
+		c.LdByte(c.HL.lo)
+		return "LD L,d8"
+	}
+	// LD R,R
+	c.opcodeMap[0x7F] = func() string {
+		c.LdReg8(c.AF.hi, c.AF.hi)
+		return "LD A,A"
+	}
+	c.opcodeMap[0x78] = func() string {
+		c.LdReg8(c.AF.hi, c.BC.hi)
+		return "LD A,B"
+	}
+	c.opcodeMap[0x79] = func() string {
+		c.LdReg8(c.AF.hi, c.BC.lo)
+		return "LD A,C"
+	}
+	c.opcodeMap[0x7A] = func() string {
+		c.LdReg8(c.AF.hi, c.DE.hi)
+		return "LD A,D"
+	}
+	c.opcodeMap[0x7B] = func() string {
+		c.LdReg8(c.AF.hi, c.DE.lo)
+		return "LD A,E"
+	}
+	c.opcodeMap[0x7C] = func() string {
+		c.LdReg8(c.AF.hi, c.HL.hi)
+		return "LD A,H"
+	}
+	c.opcodeMap[0x7D] = func() string {
+		c.LdReg8(c.AF.hi, c.HL.lo)
+		return "LD A,L"
+	}
+	c.opcodeMap[0x47] = func() string {
+		c.LdReg8(c.BC.hi, c.AF.hi)
+		return "LD B,A"
+	}
+	c.opcodeMap[0x40] = func() string {
+		c.LdReg8(c.BC.hi, c.BC.hi)
+		return "LD B,B"
+	}
+	c.opcodeMap[0x41] = func() string {
+		c.LdReg8(c.BC.hi, c.BC.lo)
+		return "LD B,C"
+	}
+	c.opcodeMap[0x42] = func() string {
+		c.LdReg8(c.BC.hi, c.DE.hi)
+		return "LD B,D"
+	}
+	c.opcodeMap[0x43] = func() string {
+		c.LdReg8(c.BC.hi, c.DE.lo)
+		return "LD B,E"
+	}
+	c.opcodeMap[0x44] = func() string {
+		c.LdReg8(c.BC.hi, c.HL.hi)
+		return "LD B,H"
+	}
+	c.opcodeMap[0x45] = func() string {
+		c.LdReg8(c.BC.hi, c.HL.lo)
+		return "LD B,L"
+	}
+	c.opcodeMap[0x4F] = func() string {
+		c.LdReg8(c.BC.lo, c.AF.hi)
+		return "LD C,A"
+	}
+	c.opcodeMap[0x48] = func() string {
+		c.LdReg8(c.BC.lo, c.BC.hi)
+		return "LD C,B"
+	}
+	c.opcodeMap[0x49] = func() string {
+		c.LdReg8(c.BC.lo, c.BC.lo)
+		return "LD C,C"
+	}
+	c.opcodeMap[0x4A] = func() string {
+		c.LdReg8(c.BC.lo, c.DE.hi)
+		return "LD C,D"
+	}
+	c.opcodeMap[0x4B] = func() string {
+		c.LdReg8(c.BC.lo, c.DE.lo)
+		return "LD C,E"
+	}
+	c.opcodeMap[0x4C] = func() string {
+		c.LdReg8(c.BC.lo, c.HL.hi)
+		return "LD C,H"
+	}
+	c.opcodeMap[0x4D] = func() string {
+		c.LdReg8(c.BC.lo, c.HL.lo)
+		return "LD C,L"
+	}
+	c.opcodeMap[0x57] = func() string {
+		c.LdReg8(c.DE.hi, c.AF.hi)
+		return "LD D,A"
+	}
+	c.opcodeMap[0x50] = func() string {
+		c.LdReg8(c.DE.hi, c.BC.hi)
+		return "LD D,B"
+	}
+	c.opcodeMap[0x51] = func() string {
+		c.LdReg8(c.DE.hi, c.BC.lo)
+		return "LD D,C"
+	}
+	c.opcodeMap[0x52] = func() string {
+		c.LdReg8(c.DE.hi, c.DE.hi)
+		return "LD D,D"
+	}
+	c.opcodeMap[0x53] = func() string {
+		c.LdReg8(c.DE.hi, c.DE.lo)
+		return "LD D,E"
+	}
+	c.opcodeMap[0x54] = func() string {
+		c.LdReg8(c.DE.hi, c.HL.hi)
+		return "LD D,H"
+	}
+	c.opcodeMap[0x55] = func() string {
+		c.LdReg8(c.DE.hi, c.HL.lo)
+		return "LD D,L"
+	}
+	c.opcodeMap[0x5F] = func() string {
+		c.LdReg8(c.DE.lo, c.AF.hi)
+		return "LD E,A"
+	}
+	c.opcodeMap[0x58] = func() string {
+		c.LdReg8(c.DE.lo, c.BC.hi)
+		return "LD E,B"
+	}
+	c.opcodeMap[0x59] = func() string {
+		c.LdReg8(c.DE.lo, c.BC.lo)
+		return "LD E,C"
+	}
+	c.opcodeMap[0x5A] = func() string {
+		c.LdReg8(c.DE.lo, c.DE.hi)
+		return "LD E,D"
+	}
+	c.opcodeMap[0x5B] = func() string {
+		c.LdReg8(c.DE.lo, c.DE.lo)
+		return "LD E,E"
+	}
+	c.opcodeMap[0x5C] = func() string {
+		c.LdReg8(c.DE.lo, c.HL.hi)
+		return "LD E,H"
+	}
+	c.opcodeMap[0x5D] = func() string {
+		c.LdReg8(c.DE.lo, c.HL.lo)
+		return "LD E,L"
+	}
+	c.opcodeMap[0x67] = func() string {
+		c.LdReg8(c.HL.hi, c.AF.hi)
+		return "LD H,A"
+	}
+	c.opcodeMap[0x60] = func() string {
+		c.LdReg8(c.HL.hi, c.BC.hi)
+		return "LD H,B"
+	}
+	c.opcodeMap[0x61] = func() string {
+		c.LdReg8(c.HL.hi, c.BC.lo)
+		return "LD H,C"
+	}
+	c.opcodeMap[0x62] = func() string {
+		c.LdReg8(c.HL.hi, c.DE.hi)
+		return "LD H,D"
+	}
+	c.opcodeMap[0x63] = func() string {
+		c.LdReg8(c.HL.hi, c.DE.lo)
+		return "LD H,E"
+	}
+	c.opcodeMap[0x64] = func() string {
+		c.LdReg8(c.HL.hi, c.HL.hi)
+		return "LD H,H"
+	}
+	c.opcodeMap[0x65] = func() string {
+		c.LdReg8(c.HL.hi, c.HL.lo)
+		return "LD H,L"
+	}
+	c.opcodeMap[0x6F] = func() string {
+		c.LdReg8(c.HL.lo, c.AF.hi)
+		return "LD L,A"
+	}
+	c.opcodeMap[0x68] = func() string {
+		c.LdReg8(c.HL.lo, c.BC.hi)
+		return "LD L,B"
+	}
+	c.opcodeMap[0x69] = func() string {
+		c.LdReg8(c.HL.lo, c.BC.lo)
+		return "LD L,C"
+	}
+	c.opcodeMap[0x6A] = func() string {
+		c.LdReg8(c.HL.lo, c.DE.hi)
+		return "LD L,D"
+	}
+	c.opcodeMap[0x6B] = func() string {
+		c.LdReg8(c.HL.lo, c.DE.lo)
+		return "LD L,E"
+	}
+	c.opcodeMap[0x6C] = func() string {
+		c.LdReg8(c.HL.lo, c.HL.hi)
+		return "LD L,H"
+	}
+	c.opcodeMap[0x6D] = func() string {
+		c.LdReg8(c.HL.lo, c.HL.lo)
+		return "LD L,L"
+	}
+
+	// LD R,a16
+	c.opcodeMap[0x0A] = func() string {
+		c.LdReg8Adr(c.AF.hi, c.BC.word)
+		return "LD A,(BC)"
+	}
+	c.opcodeMap[0x1A] = func() string {
+		c.LdReg8Adr(c.AF.hi, c.DE.word)
+		return "LD A,(DE)"
+	}
+	c.opcodeMap[0x7E] = func() string {
+		c.LdReg8Adr(c.AF.hi, c.HL.word)
+		return "LD A,(HL)"
+	}
+	c.opcodeMap[0x2A] = func() string {
+		c.LdReg8Adr(c.AF.hi, c.HL.word)
+		c.Dec16(&c.HL.word)
+		return "LD A,(HL+)"
+	}
+	c.opcodeMap[0x3A] = func() string {
+		c.LdReg8Adr(c.AF.hi, c.HL.word)
+		c.Dec16(&c.HL.word)
+		return "LD A,(HL-)"
+	}
+	c.opcodeMap[0xF0] = func() string {
+		*c.AF.hi = c.mmu.ReadByte(0xFF00 | uint16(c.mmu.ReadByte(c.PC.word+1)))
+		c.PC.word += 2
+		c.cycles += 12
+		return "LDH A,a8"
+	}
+
+	// LD RR,d16
+	c.opcodeMap[0x01] = func() string {
+		c.LdWord(&c.BC.word)
+		return "LD BC,d16"
+	}
+	c.opcodeMap[0x11] = func() string {
+		c.LdWord(&c.DE.word)
+		return "LD DE,d16"
+	}
+	c.opcodeMap[0x21] = func() string {
+		c.LdWord(&c.HL.word)
+		return "LD HL,d16"
+	}
+	c.opcodeMap[0x31] = func() string {
+		c.SP.word = c.mmu.ReadWord(c.PC.word + 1)
+		c.PC.word += 3
+		c.cycles += 12
+		return "LD SP,d16"
+	}
+
+	// LD address,R
+	c.opcodeMap[0xE2] = func() string {
+		c.mmu.WriteByte(0xFF00|uint16(*c.BC.lo), *c.AF.hi)
+		c.PC.word++ // Opcode table says 2 but that seems wrong
+		c.cycles += 8
+		return "LD (C),A"
+	}
+	c.opcodeMap[0x02] = func() string {
+		c.LdAdrA(c.BC.word)
+		return "LD (BC),A"
+	}
+	c.opcodeMap[0x12] = func() string {
+		c.LdAdrA(c.DE.word)
+		return "LD (DE),A"
+	}
+	c.opcodeMap[0x77] = func() string {
+		c.LdAdrA(c.HL.word)
+		return "LD (HL),A"
+	}
+	c.opcodeMap[0x32] = func() string {
+		// These are faster than the sum of their parts, so can't just call LdAddrA
+		c.mmu.WriteByte(c.HL.word, *c.AF.hi)
+		c.Dec16(&c.HL.word)
+		return "LD (HL-),A"
+	}
+	c.opcodeMap[0x22] = func() string {
+		// These are faster than the sum of their parts, so can't just call LdAddrA
+		c.mmu.WriteByte(c.HL.word, *c.AF.hi)
+		c.Inc16(&c.HL.word)
+		return "LD (HL+),A"
+	}
+	c.opcodeMap[0xE0] = func() string {
+		c.mmu.WriteByte(0xFF00|uint16(c.mmu.ReadByte(c.PC.word+1)), *c.AF.hi)
+		c.PC.word += 2
+		c.cycles += 12
+		return "LDH (a8),A"
+	}
+	c.opcodeMap[0xEA] = func() string {
+		c.mmu.WriteByte(c.mmu.ReadWord(c.PC.word+1), *c.AF.hi)
+		c.PC.word += 3
+		c.cycles += 16
+		return "LD a16,A"
+	}
+
+	// Jump
+	c.opcodeMap[0x18] = func() string {
+		c.JRCond(true)
+		return "JR r8"
+	}
+	c.opcodeMap[0x20] = func() string {
+		c.JRCond(!c.GetZeroFlag())
+		return "JR NZ,r8"
+	}
+	c.opcodeMap[0x28] = func() string {
+		c.JRCond(c.GetZeroFlag())
+		return "JR Z,r8"
+	}
+	c.opcodeMap[0xC3] = func() string {
+		c.PC.word = c.mmu.ReadWord(c.PC.word + 1)
+		c.cycles += 16
+		return "JP a16"
+	}
+
+	// Stack ops
+	c.opcodeMap[0xC5] = func() string {
+		c.PushWord(c.BC.word)
+		return "PUSH BC"
+	}
+	c.opcodeMap[0xC1] = func() string {
+		c.PopWord(&c.BC.word)
+		return "POP BC"
+	}
+	c.opcodeMap[0xC9] = func() string {
+		c.SP.word += 2
+		c.PC.word = c.mmu.ReadWord(c.SP.word)
+		c.cycles += 16
+		return "RET"
+	}
+	c.opcodeMap[0xCD] = func() string {
+		c.mmu.WriteWord(c.SP.word, c.PC.word+3)
+		c.SP.word -= 2
+		c.PC.word = c.mmu.ReadWord(c.PC.word + 1)
+		c.cycles += 24
+		return "CALL a16"
+	}
+
+	// Misc
+	c.opcodeMap[0x00] = func() string {
+		c.PC.word++
+		c.cycles += 4
+		return "NOP"
+	}
+	c.opcodeMap[0xCB] = func() string {
+		cbop := c.cbOpcodeMap[c.mmu.ReadByte(c.PC.word+1)]()
+		c.PC.word++ // The length is 2 in total but the CB ins is one byte and the actual instruction is one byte. Since some of the CB instructions call functions which increment c.PC, setting this to increment 1 works best.
+		c.cycles += 4
+		return "CB " + cbop
+	}
+
+	// Arithmetic
+	c.opcodeMap[0x07] = func() string {
+		c.RotateCarry(c.AF.hi, 8)
+		return "RLCA"
+	}
+	c.opcodeMap[0x17] = func() string {
+		c.Rotate(c.AF.hi, 9)
+		return "RLA"
+	}
+
+	c.opcodeMap[0x1F] = func() string {
+		c.Rotate(c.AF.hi, -9)
+		return "RRA"
+	}
+	c.opcodeMap[0x0F] = func() string {
+		c.RotateCarry(c.AF.hi, -8)
+		return "RRCA"
+	}
+
+	c.opcodeMap[0x09] = func() string {
+		c.AddReg16(&c.BC.word)
+		return "ADD HL,BC"
+	}
+	c.opcodeMap[0x19] = func() string {
+		c.AddReg16(&c.DE.word)
+		return "ADD HL,DE"
+	}
+	c.opcodeMap[0x29] = func() string {
+		c.AddReg16(&c.HL.word)
+		return "ADD HL,HL"
+	}
+	c.opcodeMap[0x39] = func() string {
+		c.AddReg16(&c.SP.word)
+		return "ADD HL,SP"
+	}
+	c.opcodeMap[0x80] = func() string {
+		c.AddReg8(c.BC.hi)
+		return "ADD B"
+	}
+	c.opcodeMap[0x81] = func() string {
+		c.AddReg8(c.BC.lo)
+		return "ADD C"
+	}
+	c.opcodeMap[0x82] = func() string {
+		c.AddReg8(c.DE.hi)
+		return "ADD D"
+	}
+	c.opcodeMap[0x83] = func() string {
+		c.AddReg8(c.DE.lo)
+		return "ADD E"
+	}
+	c.opcodeMap[0x84] = func() string {
+		c.AddReg8(c.HL.hi)
+		return "ADD H"
+	}
+	c.opcodeMap[0x85] = func() string {
+		c.AddReg8(c.HL.lo)
+		return "ADD L"
+	}
+	c.opcodeMap[0x86] = func() string {
+		c.UnsetSubtractionFlag()
+		c.UnsetCarryFlag()
+		c.UnsetHalfCarryFlag()
+		c.UnsetZeroFlag()
+
+		byte_ := c.mmu.ReadByte(c.HL.word)
+		*c.AF.hi += byte_
+
+		if *c.AF.hi < byte_ {
+			c.SetCarryFlag()
+			c.SetHalfCarryFlag()
+		}
+		if *c.AF.hi == 0 {
+			c.SetZeroFlag()
+		}
+		c.PC.word++
+		c.cycles += 8
+		return "ADD (HL)"
+	}
+	c.opcodeMap[0x87] = func() string {
+		c.AddReg8(c.AF.hi)
+		return "ADD A"
+	}
+	c.opcodeMap[0x90] = func() string {
+		c.SubReg(c.BC.hi)
+		return "SUB B"
+	}
+	c.opcodeMap[0x91] = func() string {
+		c.SubReg(c.BC.lo)
+		return "SUB C"
+	}
+	c.opcodeMap[0x92] = func() string {
+		c.SubReg(c.DE.hi)
+		return "SUB D"
+	}
+	c.opcodeMap[0x93] = func() string {
+		c.SubReg(c.DE.lo)
+		return "SUB E"
+	}
+	c.opcodeMap[0x94] = func() string {
+		c.SubReg(c.HL.hi)
+		return "SUB H"
+	}
+	c.opcodeMap[0x95] = func() string {
+		c.SubReg(c.HL.lo)
+		return "SUB L"
+	}
+	c.opcodeMap[0x96] = func() string {
+		c.SetSubtractionFlag()
+		c.UnsetCarryFlag()
+		c.UnsetHalfCarryFlag()
+		c.UnsetZeroFlag()
+
+		byte_ := c.mmu.ReadByte(c.HL.word)
+		if *c.AF.hi < byte_ {
+			c.SetCarryFlag()
+			c.SetHalfCarryFlag()
+		} else if *c.AF.hi == byte_ {
+			c.SetZeroFlag()
+		}
+		*c.AF.hi -= byte_
+		c.PC.word++
+		c.cycles += 8
+		return "SUB (HL)"
+	}
+	c.opcodeMap[0x97] = func() string {
+		c.SubReg(c.AF.hi)
+		return "SUB A"
+	}
+	c.opcodeMap[0xA8] = func() string {
+		c.XorReg(c.BC.hi)
+		return "XOR B"
+	}
+	c.opcodeMap[0xA9] = func() string {
+		c.XorReg(c.BC.lo)
+		return "XOR C"
+	}
+	c.opcodeMap[0xAA] = func() string {
+		c.XorReg(c.DE.hi)
+		return "XOR D"
+	}
+	c.opcodeMap[0xAB] = func() string {
+		c.XorReg(c.DE.lo)
+		return "XOR E"
+	}
+	c.opcodeMap[0xAC] = func() string {
+		c.XorReg(c.HL.hi)
+		return "XOR H"
+	}
+	c.opcodeMap[0xAD] = func() string {
+		c.XorReg(c.HL.lo)
+		return "XOR L"
+	}
+	c.opcodeMap[0xAE] = func() string {
+		byte_ := c.mmu.ReadByte(c.HL.word)
+		*c.AF.hi ^= byte_
+		if *c.AF.hi == 0 {
+			c.SetZeroFlag()
+		} else {
+			c.UnsetZeroFlag()
+		}
+		c.UnsetSubtractionFlag()
+		c.UnsetHalfCarryFlag()
+		c.UnsetCarryFlag()
+		c.PC.word++
+		c.cycles += 4
+		c.cycles += 4
+		return "XOR (HL)"
+	}
+	c.opcodeMap[0xAF] = func() string {
+		c.XorReg(c.AF.hi)
+		return "XOR A"
+	}
+	c.opcodeMap[0xB0] = func() string {
+		c.OrReg(c.BC.hi)
+		return "OR B"
+	}
+	c.opcodeMap[0xB1] = func() string {
+		c.OrReg(c.BC.lo)
+		return "OR C"
+	}
+	c.opcodeMap[0xB2] = func() string {
+		c.OrReg(c.DE.hi)
+		return "OR D"
+	}
+	c.opcodeMap[0xB3] = func() string {
+		c.OrReg(c.DE.lo)
+		return "OR E"
+	}
+	c.opcodeMap[0xB4] = func() string {
+		c.OrReg(c.HL.hi)
+		return "OR H"
+	}
+	c.opcodeMap[0xB5] = func() string {
+		c.OrReg(c.HL.lo)
+		return "OR L"
+	}
+	c.opcodeMap[0xB6] = func() string {
+		byte_ := c.mmu.ReadByte(c.HL.word)
+		*c.AF.hi |= byte_
+		if *c.AF.hi == 0 {
+			c.SetZeroFlag()
+		} else {
+			c.UnsetZeroFlag()
+		}
+		c.UnsetSubtractionFlag()
+		c.UnsetHalfCarryFlag()
+		c.UnsetCarryFlag()
+		c.PC.word++
+		c.cycles += 8
+		return "OR (HL)"
+	}
+	c.opcodeMap[0xB7] = func() string {
+		c.OrReg(c.AF.hi)
+		return "OR A"
+	}
+	c.opcodeMap[0xBE] = func() string {
+		c.CPByte(c.mmu.ReadByte(c.HL.word))
+		return "CP (HL)"
+	}
+	c.opcodeMap[0xFE] = func() string {
+		c.CPByte(c.mmu.ReadByte(c.PC.word + 1))
+		c.PC.word++ // CP d8 is length 2 and CPByte only increases by 1
+		return "CP d8"
+	}
+
+	// CB opcode map setup here
+	c.cbOpcodeMap = make(map[uint8]func() string)
+
+	c.cbOpcodeMap[0x7C] = func() string {
+		c.UnsetSubtractionFlag()
+		c.SetHalfCarryFlag()
+		if CheckBit(c.HL.hi, 7) {
+			c.UnsetZeroFlag()
+		} else {
+			c.SetZeroFlag()
+		}
+		c.PC.word++
+		c.cycles += 4
+		return "BIT 7,H"
+	}
+	c.cbOpcodeMap[0x11] = func() string {
+		c.Rotate(c.BC.lo, 9)
+		return "RL C"
+	}
+}
+
+// CPByte compares a byte with the value in the A register, setting whichever flags are relevant to the result.
+func (c *CPU) CPByte(byte_ uint8) {
+	c.SetSubtractionFlag()
+	c.UnsetZeroFlag()
+	c.UnsetCarryFlag()
+	c.UnsetHalfCarryFlag()
+	if *c.AF.hi-byte_ == 0 {
+		c.SetZeroFlag()
+	}
+	if *c.AF.hi < byte_ {
+		c.SetCarryFlag()
+		c.SetHalfCarryFlag()
+	}
+	c.PC.word++
+	c.cycles += 8
+}
+
+// Rotate rotates a byte by a given amount.
+func (c *CPU) Rotate(register *uint8, amt int) {
+	toCarry := false
+
+	carryBit := uint8(0)
+	if amt > 1 {
+		carryBit = 7
+	}
+
+	if CheckBit(c.AF.hi, carryBit) {
+		toCarry = true
+	}
+
+	*c.AF.hi = bits.RotateLeft8(*c.AF.hi, amt)
+
+	if c.GetCarryFlag() {
+		*c.AF.hi |= BitVal(carryBit)
+	}
+
+	if toCarry {
+		c.SetCarryFlag()
+	} else {
+		c.UnsetCarryFlag()
+	}
+	c.UnsetZeroFlag()
+	c.UnsetHalfCarryFlag()
+	c.UnsetSubtractionFlag()
+
+	c.PC.word++
+	c.cycles += 4
+}
+
+// RotateCarry rotates a byte by a given amount and carrys the overflow bit.
+func (c *CPU) RotateCarry(register *uint8, amt int) {
+	carryBit := uint8(0)
+	if amt > 1 {
+		carryBit = 7
+	}
+	if CheckBit(c.AF.hi, carryBit) {
+		c.SetCarryFlag()
+	} else {
+		c.UnsetCarryFlag()
+	}
+	*c.AF.hi = bits.RotateLeft8(*c.AF.hi, amt)
+	c.UnsetZeroFlag()
+	c.UnsetHalfCarryFlag()
+	c.UnsetSubtractionFlag()
+	c.PC.word++
+	c.cycles += 4
+}
+
+// JRCond jumps to a relative position if condition is true.
+func (c *CPU) JRCond(condition bool) {
+	if condition {
+		c.cycles += 12
+		// TODO: Probably a way to do this in one line (128 - arg or something)
+		if arg := uint16(c.mmu.ReadByte(c.PC.word + 1)); arg > 127 {
+			c.PC.word = c.PC.word - (255 - arg) + 1
+		} else {
+			c.PC.word = c.PC.word + arg + 2
+		}
+	} else {
+		c.PC.word += 2
+		c.cycles += 8
+	}
+}
+
+// PushWord pushes a 16-bit word onto the stack
+func (c *CPU) PushWord(word uint16) {
+	c.mmu.WriteWord(c.SP.word, word)
+	c.SP.word -= 2
+	c.PC.word++
+	c.cycles += 16
+}
+
+// PopWord pops a 16-bit word off of the stack into the location specified.
+func (c *CPU) PopWord(word *uint16) {
+	c.SP.word += 2
+	*word = c.mmu.ReadWord(c.SP.word)
+	c.PC.word++
+	c.cycles += 12
 }
 
 // Inc8 increments an 8-bit register by 1.
-// It returns the length and duration of the instruction.
-func (c *CPU) Inc8(register *uint8) (uint8, uint8) {
+func (c *CPU) Inc8(register *uint8) {
 	*register++
 	c.UnsetSubtractionFlag()
 	if *register == 0 {
 		c.SetZeroFlag()
 		c.UnsetHalfCarryFlag()
 	}
-	return 1, 4
+	c.PC.word++
+	c.cycles += 4
 }
 
 // Dec8 increments an 8-bit register by 1.
-// It returns the length and duration of the instruction.
-func (c *CPU) Dec8(register *uint8) (uint8, uint8) {
+func (c *CPU) Dec8(register *uint8) {
 	*register--
 	c.SetSubtractionFlag()
 	c.UnsetZeroFlag()
@@ -100,61 +920,61 @@ func (c *CPU) Dec8(register *uint8) (uint8, uint8) {
 	} else if *register == 255 {
 		c.SetHalfCarryFlag()
 	}
-	return 1, 4
+	c.PC.word++
+	c.cycles += 4
 }
 
 // Inc16 increments a 16-bit register pair by 1.
-// It returns the length and duration of the instruction.
-func (c *CPU) Inc16(registerPair *uint16) (uint8, uint8) {
+func (c *CPU) Inc16(registerPair *uint16) {
 	*registerPair++
-	return 1, 8
+	c.PC.word++
+	c.cycles += 8
 }
 
 // Dec16 increments a 16-bit register pair by 1.
-// It returns the length and duration of the instruction.
-func (c *CPU) Dec16(registerPair *uint16) (uint8, uint8) {
+func (c *CPU) Dec16(registerPair *uint16) {
 	*registerPair--
-	return 1, 8
+	c.PC.word++
+	c.cycles += 8
 }
 
 // LdByte reads a byte into a register.
-// It returns the length and duration of the instruction.
-func (c *CPU) LdByte(register *uint8, byte_ uint8) (uint8, uint8) {
-	*register = byte_
-	return 2, 8
+func (c *CPU) LdByte(register *uint8) {
+	*register = c.mmu.ReadByte(c.PC.word + 1)
+	c.PC.word += 2
+	c.cycles += 8
 }
 
 // LdWord loads a 16-bit word into a register pair.
-// It returns the length and duration of the instruction.
-func (c *CPU) LdWord(registerPair *uint16, word uint16) (uint8, uint8) {
-	*registerPair = word
-	return 3, 12
+func (c *CPU) LdWord(registerPair *uint16) {
+	*registerPair = c.mmu.ReadWord(c.PC.word + 1)
+	c.PC.word += 3
+	c.cycles += 12
 }
 
 // LdReg8 copies the contents of a register into another.
-// It returns the length and duration of the instruction.
-func (c *CPU) LdReg8(to *uint8, from *uint8) (uint8, uint8) {
+func (c *CPU) LdReg8(to *uint8, from *uint8) {
 	*to = *from
-	return 1, 4
+	c.PC.word++
+	c.cycles += 4
 }
 
 // LdReg8Adr copies the contents of a memory address into a register.
-// It returns the length and duration of the instruction.
-func (c *CPU) LdReg8Adr(register *uint8, address uint16) (uint8, uint8) {
+func (c *CPU) LdReg8Adr(register *uint8, address uint16) {
 	*register = c.mmu.ReadByte(address)
-	return 1, 8
+	c.PC.word += 1
+	c.cycles += 8
 }
 
 // LdHLA copies the value of register A into the memory address specified.
-// It returns the length and duration of the instruction.
-func (c *CPU) LdAdrA(address uint16) (uint8, uint8) {
+func (c *CPU) LdAdrA(address uint16) {
 	c.mmu.WriteByte(address, *c.AF.hi)
-	return 1, 8
+	c.PC.word++
+	c.cycles += 8
 }
 
 // AddReg8 adds a register to A.
-// It returns the length and duration of the instruction.
-func (c *CPU) AddReg8(register *uint8) (uint8, uint8) {
+func (c *CPU) AddReg8(register *uint8) {
 	c.UnsetSubtractionFlag()
 	c.UnsetCarryFlag()
 	c.UnsetHalfCarryFlag()
@@ -169,23 +989,23 @@ func (c *CPU) AddReg8(register *uint8) (uint8, uint8) {
 	if *c.AF.hi == 0 {
 		c.SetZeroFlag()
 	}
-	return 1, 4
+	c.PC.word++
+	c.cycles += 4
 }
 
 // AddReg16 adds a register to HL, storing the result in HL.
-// It returns the length and duration of the instruction.
-func (c *CPU) AddReg16(word *uint16) (uint8, uint8) {
+func (c *CPU) AddReg16(word *uint16) {
 	c.UnsetSubtractionFlag()
 	c.UnsetCarryFlag()
 	c.UnsetHalfCarryFlag()
-
 	c.HL.word += *word
-	return 1, 8
+
+	c.PC.word++
+	c.cycles += 8
 }
 
 // SubReg subtracts a register from A.
-// It returns the length and duration of the instruction.
-func (c *CPU) SubReg(register *uint8) (uint8, uint8) {
+func (c *CPU) SubReg(register *uint8) {
 	c.SetSubtractionFlag()
 	c.UnsetCarryFlag()
 	c.UnsetHalfCarryFlag()
@@ -197,12 +1017,12 @@ func (c *CPU) SubReg(register *uint8) (uint8, uint8) {
 		c.SetZeroFlag()
 	}
 	*c.AF.hi -= *register
-	return 1, 4
+	c.PC.word++
+	c.cycles += 4
 }
 
 // Xors a register with register A and stores the result in A.
-// Returns the length and duration of the instruction.
-func (c *CPU) XorReg(register *uint8) (uint8, uint8) {
+func (c *CPU) XorReg(register *uint8) {
 	*c.AF.hi ^= *register
 	if *c.AF.hi == 0 {
 		c.SetZeroFlag()
@@ -212,12 +1032,13 @@ func (c *CPU) XorReg(register *uint8) (uint8, uint8) {
 	c.UnsetSubtractionFlag()
 	c.UnsetHalfCarryFlag()
 	c.UnsetCarryFlag()
-	return 1, 4
+	c.PC.word++
+	c.cycles += 4
 }
 
 // Ors a register with register A and stores the result in A.
 // Returns the length and duration of the instruction.
-func (c *CPU) OrReg(register *uint8) (uint8, uint8) {
+func (c *CPU) OrReg(register *uint8) {
 	*c.AF.hi |= *register
 	if *c.AF.hi == 0 {
 		c.SetZeroFlag()
@@ -227,783 +1048,61 @@ func (c *CPU) OrReg(register *uint8) (uint8, uint8) {
 	c.UnsetSubtractionFlag()
 	c.UnsetHalfCarryFlag()
 	c.UnsetCarryFlag()
-	return 1, 4
+	c.PC.word++
+	c.cycles += 4
 }
 
 // Start writes the bootloader data into the 0x100-0xFFF range of the MMU and returns a stepping function.
-// This function takes one CPU step each time it is called and returns the duration of the processed step.
-func (c *CPU) Start() func() uint8 {
+// This returned function takes one CPU step each time it is called.
+func (c *CPU) Start() func() {
 	for i, v := range c.bootloader {
 		address := uint16(i)
 		c.mmu.WriteByte(address, v)
 	}
 
-	cb := false
-	breaking := false
-	curIns := Instruction{}
-	var insCount uint64 = 0
+	var lastIns string
 
-	return func() uint8 {
+	var insCount = uint64(0)
+	start := time.Now()
+	var timeDelay time.Duration
+	var dt time.Duration
+	oldTime := time.Now()
+	oldCycles := uint64(0)
+
+	return func() {
+
+		oldCycles = c.cycles
+		oldTime = time.Now()
+		// Procces the current opcode
+		lastIns = c.opcodeMap[c.mmu.ReadByte(c.PC.word)]()
+		dt = time.Now().Sub(oldTime)
+
+		timeDelay = time.Duration(c.cycles-oldCycles) * (65 * time.Nanosecond)
+		if dt < timeDelay {
+			// fmt.Println(timeDelay - dt)
+			time.Sleep(timeDelay - dt)
+		}
+
+		if c.cycles > 5000000 {
+			fmt.Println("5M CPU ops in", time.Now().Sub(start))
+			c.cycles = 0
+			start = time.Now()
+		}
 		insCount++
 
-		curIns, cb, breaking = c.Instruction(c.mmu.ReadByte(c.PC.word), cb, breaking)
+		// fmt.Printf("%X ", c.PC.word)
+		if c.PC.word == 0x100 {
+			c.breaking = true
+		}
 
-		if breaking {
-			c.PrintInstruction(insCount, curIns)
+		if c.breaking {
+			fmt.Printf("%X\t", c.PC.word)
+			c.PrintInstruction(lastIns)
 			c.PrintRegisters()
 			c.PrintFlagRegister()
 			fmt.Scanln()
 		}
-		return curIns.duration
 	}
-}
-
-// Instruction executes one instruction, depending on if the previous byte was 0xCB.
-// If breaking = true, the instruction and register data will be printed.
-// Returns the current Instruction, cbFlag if the byte is 0xCB, and whether to begin breaking.
-func (c *CPU) Instruction(opcode uint8, cbFlag bool, breaking bool) (Instruction, bool, bool) {
-	var name string
-	var length uint8
-	var location = c.PC.word
-	var duration uint8
-	var jump bool
-	var jumpTo uint16
-
-	// If the previous byte was 0xCB we process the instruction from the CB table
-	if cbFlag {
-		name, length, duration = c.CBInstruction(opcode, c.mmu.ReadByte(c.PC.word+1))
-		cbFlag = false
-	} else {
-
-		// TODO: Probably should be a map[uint8]func for speed or array of func pointers
-		switch opcode {
-
-		// INC/DEC
-		case 0x3C:
-			name = "INC A"
-			length, duration = c.Inc8(c.AF.hi)
-		case 0x3D:
-			name = "DEC A"
-			length, duration = c.Dec8(c.AF.hi)
-		case 0x04:
-			name = "INC B"
-			length, duration = c.Inc8(c.BC.hi)
-		case 0x05:
-			name = "DEC B"
-			length, duration = c.Dec8(c.BC.hi)
-		case 0x0C:
-			name = "INC C"
-			length, duration = c.Inc8(c.BC.lo)
-		case 0x0D:
-			name = "DEC C"
-			length, duration = c.Dec8(c.BC.lo)
-		case 0x14:
-			name = "INC D"
-			length, duration = c.Inc8(c.DE.hi)
-		case 0x15:
-			name = "DEC D"
-			length, duration = c.Dec8(c.DE.hi)
-		case 0x1C:
-			name = "INC E"
-			length, duration = c.Inc8(c.DE.lo)
-		case 0x1D:
-			name = "DEC E"
-			length, duration = c.Dec8(c.DE.lo)
-		case 0x24:
-			name = "INC H"
-			length, duration = c.Inc8(c.HL.hi)
-		case 0x25:
-			name = "DEC H"
-			length, duration = c.Dec8(c.HL.hi)
-		case 0x2C:
-			name = "INC L"
-			length, duration = c.Inc8(c.HL.lo)
-		case 0x2D:
-			name = "DEC L"
-			length, duration = c.Inc8(c.HL.lo)
-		case 0x03:
-			name = "INC BC"
-			length, duration = c.Inc16(&c.BC.word)
-		case 0x0B:
-			name = "DEC BC"
-			length, duration = c.Dec16(&c.BC.word)
-		case 0x13:
-			name = "INC DE"
-			length, duration = c.Inc16(&c.DE.word)
-		case 0x1B:
-			name = "DEC DE"
-			length, duration = c.Dec16(&c.DE.word)
-		case 0x23:
-			name = "INC HL"
-			length, duration = c.Inc16(&c.HL.word)
-		case 0x2B:
-			name = "DEC HL"
-			length, duration = c.Dec16(&c.HL.word)
-
-			// LD R,d8
-		case 0x3E:
-			name = "LD A,d8"
-			length, duration = c.LdByte(c.AF.hi, c.mmu.ReadByte(c.PC.word+1))
-		case 0x06:
-			name = "LD B,d8"
-			length, duration = c.LdByte(c.BC.hi, c.mmu.ReadByte(c.PC.word+1))
-		case 0x0E:
-			name = "LD C,d8"
-			length, duration = c.LdByte(c.BC.lo, c.mmu.ReadByte(c.PC.word+1))
-		case 0x16:
-			name = "LD D,d8"
-			length, duration = c.LdByte(c.DE.hi, c.mmu.ReadByte(c.PC.word+1))
-		case 0x1E:
-			name = "LD E,d8"
-			length, duration = c.LdByte(c.DE.lo, c.mmu.ReadByte(c.PC.word+1))
-		case 0x26:
-			name = "LD H,d8"
-			length, duration = c.LdByte(c.HL.hi, c.mmu.ReadByte(c.PC.word+1))
-		case 0x2E:
-			name = "LD L,d8"
-			length, duration = c.LdByte(c.HL.lo, c.mmu.ReadByte(c.PC.word+1))
-
-			// LD R,R
-		case 0x7F:
-			name = "LD A,A"
-			length, duration = c.LdReg8(c.AF.hi, c.AF.hi)
-		case 0x78:
-			name = "LD A,B"
-			length, duration = c.LdReg8(c.AF.hi, c.BC.hi)
-		case 0x79:
-			name = "LD A,C"
-			length, duration = c.LdReg8(c.AF.hi, c.BC.lo)
-		case 0x7A:
-			name = "LD A,D"
-			length, duration = c.LdReg8(c.AF.hi, c.DE.hi)
-		case 0x7B:
-			name = "LD A,E"
-			length, duration = c.LdReg8(c.AF.hi, c.DE.lo)
-		case 0x7C:
-			name = "LD A,H"
-			length, duration = c.LdReg8(c.AF.hi, c.HL.hi)
-		case 0x7D:
-			name = "LD A,L"
-			length, duration = c.LdReg8(c.AF.hi, c.HL.lo)
-		case 0x47:
-			name = "LD B,A"
-			length, duration = c.LdReg8(c.BC.hi, c.AF.hi)
-		case 0x40:
-			name = "LD B,B"
-			length, duration = c.LdReg8(c.BC.hi, c.BC.hi)
-		case 0x41:
-			name = "LD B,C"
-			length, duration = c.LdReg8(c.BC.hi, c.BC.lo)
-		case 0x42:
-			name = "LD B,D"
-			length, duration = c.LdReg8(c.BC.hi, c.DE.hi)
-		case 0x43:
-			name = "LD B,E"
-			length, duration = c.LdReg8(c.BC.hi, c.DE.lo)
-		case 0x44:
-			name = "LD B,H"
-			length, duration = c.LdReg8(c.BC.hi, c.HL.hi)
-		case 0x45:
-			name = "LD B,L"
-			length, duration = c.LdReg8(c.BC.hi, c.HL.lo)
-		case 0x4F:
-			name = "LD C,A"
-			length, duration = c.LdReg8(c.BC.lo, c.AF.hi)
-		case 0x48:
-			name = "LD C,B"
-			length, duration = c.LdReg8(c.BC.lo, c.BC.hi)
-		case 0x49:
-			name = "LD C,C"
-			length, duration = c.LdReg8(c.BC.lo, c.BC.lo)
-		case 0x4A:
-			name = "LD C,D"
-			length, duration = c.LdReg8(c.BC.lo, c.DE.hi)
-		case 0x4B:
-			name = "LD C,E"
-			length, duration = c.LdReg8(c.BC.lo, c.DE.lo)
-		case 0x4C:
-			name = "LD C,H"
-			length, duration = c.LdReg8(c.BC.lo, c.HL.hi)
-		case 0x4D:
-			name = "LD C,L"
-			length, duration = c.LdReg8(c.BC.lo, c.HL.lo)
-		case 0x57:
-			name = "LD D,A"
-			length, duration = c.LdReg8(c.DE.hi, c.AF.hi)
-		case 0x50:
-			name = "LD D,B"
-			length, duration = c.LdReg8(c.DE.hi, c.BC.hi)
-		case 0x51:
-			name = "LD D,C"
-			length, duration = c.LdReg8(c.DE.hi, c.BC.lo)
-		case 0x52:
-			name = "LD D,D"
-			length, duration = c.LdReg8(c.DE.hi, c.DE.hi)
-		case 0x53:
-			name = "LD D,E"
-			length, duration = c.LdReg8(c.DE.hi, c.DE.lo)
-		case 0x54:
-			name = "LD D,H"
-			length, duration = c.LdReg8(c.DE.hi, c.HL.hi)
-		case 0x55:
-			name = "LD D,L"
-			length, duration = c.LdReg8(c.DE.hi, c.HL.lo)
-		case 0x5F:
-			name = "LD E,A"
-			length, duration = c.LdReg8(c.DE.lo, c.AF.hi)
-		case 0x58:
-			name = "LD E,B"
-			length, duration = c.LdReg8(c.DE.lo, c.BC.hi)
-		case 0x59:
-			name = "LD E,C"
-			length, duration = c.LdReg8(c.DE.lo, c.BC.lo)
-		case 0x5A:
-			name = "LD E,D"
-			length, duration = c.LdReg8(c.DE.lo, c.DE.hi)
-		case 0x5B:
-			name = "LD E,E"
-			length, duration = c.LdReg8(c.DE.lo, c.DE.lo)
-		case 0x5C:
-			name = "LD E,H"
-			length, duration = c.LdReg8(c.DE.lo, c.HL.hi)
-		case 0x5D:
-			name = "LD E,L"
-			length, duration = c.LdReg8(c.DE.lo, c.HL.lo)
-		case 0x67:
-			name = "LD H,A"
-			length, duration = c.LdReg8(c.HL.hi, c.AF.hi)
-		case 0x60:
-			name = "LD H,B"
-			length, duration = c.LdReg8(c.HL.hi, c.BC.hi)
-		case 0x61:
-			name = "LD H,C"
-			length, duration = c.LdReg8(c.HL.hi, c.BC.lo)
-		case 0x62:
-			name = "LD H,D"
-			length, duration = c.LdReg8(c.HL.hi, c.DE.hi)
-		case 0x63:
-			name = "LD H,E"
-			length, duration = c.LdReg8(c.HL.hi, c.DE.lo)
-		case 0x64:
-			name = "LD H,H"
-			length, duration = c.LdReg8(c.HL.hi, c.HL.hi)
-		case 0x65:
-			name = "LD H,L"
-			length, duration = c.LdReg8(c.HL.hi, c.HL.lo)
-		case 0x6F:
-			name = "LD L,A"
-			length, duration = c.LdReg8(c.HL.lo, c.AF.hi)
-		case 0x68:
-			name = "LD L,B"
-			length, duration = c.LdReg8(c.HL.lo, c.BC.hi)
-		case 0x69:
-			name = "LD L,C"
-			length, duration = c.LdReg8(c.HL.lo, c.BC.lo)
-		case 0x6A:
-			name = "LD L,D"
-			length, duration = c.LdReg8(c.HL.lo, c.DE.hi)
-		case 0x6B:
-			name = "LD L,E"
-			length, duration = c.LdReg8(c.HL.lo, c.DE.lo)
-		case 0x6C:
-			name = "LD L,H"
-			length, duration = c.LdReg8(c.HL.lo, c.HL.hi)
-		case 0x6D:
-			name = "LD L,L"
-			length, duration = c.LdReg8(c.HL.lo, c.HL.lo)
-
-			// LD R,a16
-		case 0x0A:
-			name = "LD A,(BC)"
-			length, duration = c.LdReg8Adr(c.AF.hi, c.BC.word)
-		case 0x1A:
-			name = "LD A,(DE)"
-			length, duration = c.LdReg8Adr(c.AF.hi, c.DE.word)
-		case 0x7E:
-			name = "LD A,(HL)"
-			length, duration = c.LdReg8Adr(c.AF.hi, c.HL.word)
-		case 0x2A:
-			name = "LD A,(HL+)"
-			length, duration = c.LdReg8Adr(c.AF.hi, c.HL.word)
-			_, _ = c.Dec16(&c.HL.word)
-		case 0x3A:
-			name = "LD A,(HL-)"
-			length, duration = c.LdReg8Adr(c.AF.hi, c.HL.word)
-			_, _ = c.Dec16(&c.HL.word)
-		case 0xF0:
-			name = "LDH A,a8"
-			length = 2
-			duration = 12
-			address := 0xFF00 | uint16(c.mmu.ReadByte(c.PC.word+1))
-			*c.AF.hi = c.mmu.ReadByte(address)
-
-			// LD RR,d16
-		case 0x01:
-			name = "LD BC,d16"
-			length, duration = c.LdWord(&c.BC.word, c.mmu.ReadWord(c.PC.word+1))
-		case 0x11:
-			name = "LD DE,d16"
-			length, duration = c.LdWord(&c.DE.word, c.mmu.ReadWord(c.PC.word+1))
-		case 0x21:
-			name = "LD HL,d16"
-			length, duration = c.LdWord(&c.HL.word, c.mmu.ReadWord(c.PC.word+1))
-
-		case 0x31:
-			name = "LD SP,d16"
-			length = 3
-			duration = 12
-			c.SP.word = c.mmu.ReadWord(c.PC.word + 1)
-
-			// LD address,R
-		case 0xE2:
-			name = "LD (C),A"
-			length = 2
-			duration = 8
-			address := 0xFF00 | uint16(*c.BC.lo)
-			c.mmu.WriteByte(address, *c.AF.hi)
-			length = 1 // Change later when figure out wtf
-		case 0x02:
-			name = "LD (BC),A"
-			length, duration = c.LdAdrA(c.BC.word)
-		case 0x12:
-			name = "LD (DE),A"
-			length, duration = c.LdAdrA(c.DE.word)
-		case 0x77:
-			name = "LD (HL),A"
-			length, duration = c.LdAdrA(c.HL.word)
-		case 0x32:
-			name = "LD (HL-),A"
-			length, duration = c.LdAdrA(c.HL.word)
-			_, _ = c.Dec16(&c.HL.word)
-		case 0x22:
-			name = "LD (HL+),A"
-			length, duration = c.LdAdrA(c.HL.word)
-			_, _ = c.Inc16(&c.HL.word)
-		case 0xE0:
-			name = "LDH (a8),A"
-			length = 2
-			duration = 12
-			address := 0xFF00 | uint16(c.mmu.ReadByte(c.PC.word+1))
-			c.mmu.WriteByte(address, *c.AF.hi)
-		case 0xEA:
-			name = "LD a16,A"
-			length = 3
-			duration = 16
-			c.mmu.WriteByte(c.mmu.ReadWord(c.PC.word+1), *c.AF.hi)
-
-			// Jump
-		case 0x18:
-			name = "JR r8"
-			length = 2
-			duration = 12
-			arg := uint16(c.mmu.ReadByte(c.PC.word + 1))
-			jump = true
-			if arg > 127 {
-				jumpTo = c.PC.word - (255 - arg) + 1
-			} else {
-				jumpTo = c.PC.word + arg + uint16(length)
-			}
-		case 0x20:
-			name = "JR NZ,r8"
-			length = 2
-			duration = 8
-			arg := uint16(c.mmu.ReadByte(c.PC.word + 1))
-			if !c.GetZeroFlag() {
-				jump = true
-				duration = 12
-				if arg > 127 {
-					jumpTo = c.PC.word - (255 - arg) + 1
-				} else {
-					jumpTo = c.PC.word + arg + uint16(length)
-				}
-			}
-		case 0x28:
-			name = "JR Z,r8"
-			length = 2
-			duration = 8
-			arg := uint16(c.mmu.ReadByte(c.PC.word + 1))
-			if c.GetZeroFlag() {
-				jump = true
-				duration = 12
-				if arg > 127 {
-					jumpTo = c.PC.word - (255 - arg) + 1
-				} else {
-					jumpTo = c.PC.word + arg + uint16(length)
-				}
-			}
-		case 0xC3:
-			name = "JP a16"
-			length = 3
-			duration = 16
-			jump = true
-			jumpTo = c.mmu.ReadWord(c.PC.word + 1)
-
-			// Stack ops
-		case 0xC5:
-			name = "PUSH BC"
-			length = 1
-			duration = 16
-			c.mmu.WriteWord(c.SP.word, c.BC.word)
-			c.SP.word -= 2
-		case 0xC1:
-			name = "POP BC"
-			length = 1
-			duration = 12
-			c.SP.word += 2
-			c.BC.word = c.mmu.ReadWord(c.SP.word)
-		case 0xC9:
-			name = "RET"
-			length = 1
-			duration = 16
-			jump = true
-			c.SP.word += 2
-			jumpTo = c.mmu.ReadWord(c.SP.word)
-		case 0xCD:
-			name = "CALL a16"
-			length = 3
-			duration = 24
-			c.mmu.WriteWord(c.SP.word, c.PC.word+uint16(length))
-			c.SP.word -= 2
-			jump = true
-			jumpTo = c.mmu.ReadWord(c.PC.word + 1)
-
-			// Misc
-		case 0x00:
-			name = "NOP"
-			length = 1
-			duration = 4
-		case 0xCB:
-			name = "CB Prefix"
-			length = 1
-			duration = 4
-			cbFlag = true
-
-			// Arithmetic
-		case 0x07:
-			name = "RLCA"
-			length = 1
-			duration = 4
-			if CheckBit(c.AF.hi, 7) {
-				c.SetCarryFlag()
-			} else {
-				c.UnsetCarryFlag()
-			}
-			*c.AF.hi = bits.RotateLeft8(*c.AF.hi, 8)
-			c.UnsetZeroFlag()
-			c.UnsetHalfCarryFlag()
-			c.UnsetSubtractionFlag()
-		case 0x17:
-			name = "RLA"
-			length = 1
-			duration = 4
-			toCarry := false
-			if CheckBit(c.AF.hi, 7) {
-				toCarry = true
-			}
-			*c.AF.hi = bits.RotateLeft8(*c.AF.hi, 9)
-			if c.GetCarryFlag() {
-				*c.AF.hi |= 1
-			}
-			if toCarry {
-				c.SetCarryFlag()
-			} else {
-				c.UnsetCarryFlag()
-			}
-			c.UnsetHalfCarryFlag()
-			c.UnsetSubtractionFlag()
-		case 0x0F:
-			name = "RRCA"
-			length = 1
-			duration = 4
-			if CheckBit(c.AF.hi, 0) {
-				c.SetCarryFlag()
-			} else {
-				c.UnsetCarryFlag()
-			}
-			*c.AF.hi = bits.RotateLeft8(*c.AF.hi, -8)
-			c.UnsetZeroFlag()
-			c.UnsetHalfCarryFlag()
-			c.UnsetSubtractionFlag()
-		case 0x1F:
-			name = "RRA"
-			length = 1
-			duration = 4
-			toCarry := false
-			if CheckBit(c.AF.hi, 1) {
-				toCarry = true
-			}
-			*c.AF.hi = bits.RotateLeft8(*c.AF.hi, -9)
-			if c.GetCarryFlag() {
-				*c.AF.hi |= BitVal(7)
-			}
-			if toCarry {
-				c.SetCarryFlag()
-			} else {
-				c.UnsetCarryFlag()
-			}
-			c.UnsetHalfCarryFlag()
-			c.UnsetSubtractionFlag()
-
-		case 0x09:
-			name = "ADD HL,BC"
-			length, duration = c.AddReg16(&c.BC.word)
-		case 0x19:
-			name = "ADD HL,DE"
-			length, duration = c.AddReg16(&c.DE.word)
-		case 0x29:
-			name = "ADD HL,HL"
-			length, duration = c.AddReg16(&c.HL.word)
-		case 0x39:
-			name = "ADD HL,SP"
-			length, duration = c.AddReg16(&c.SP.word)
-		case 0x80:
-			name = "ADD B"
-			length, duration = c.AddReg8(c.BC.hi)
-		case 0x81:
-			name = "ADD C"
-			length, duration = c.AddReg8(c.BC.lo)
-		case 0x82:
-			name = "ADD D"
-			length, duration = c.AddReg8(c.DE.hi)
-		case 0x83:
-			name = "ADD E"
-			length, duration = c.AddReg8(c.DE.lo)
-		case 0x84:
-			name = "ADD H"
-			length, duration = c.AddReg8(c.HL.hi)
-		case 0x85:
-			name = "ADD L"
-			length, duration = c.AddReg8(c.HL.lo)
-		case 0x86:
-			name = "ADD (HL)"
-			length = 1
-			duration = 8
-			add := c.mmu.ReadByte(c.HL.word)
-			c.UnsetSubtractionFlag()
-			c.UnsetCarryFlag()
-			c.UnsetHalfCarryFlag()
-			c.UnsetZeroFlag()
-			*c.AF.hi += add
-			if *c.AF.hi == 0 {
-				c.SetZeroFlag()
-			}
-			if *c.AF.hi < add {
-				c.SetCarryFlag()
-				c.SetHalfCarryFlag()
-			}
-		case 0x87:
-			name = "ADD A"
-			length, duration = c.AddReg8(c.AF.hi)
-
-		case 0x90:
-			name = "SUB B"
-			length, duration = c.SubReg(c.BC.hi)
-		case 0x91:
-			name = "SUB C"
-			length, duration = c.SubReg(c.BC.lo)
-		case 0x92:
-			name = "SUB D"
-			length, duration = c.SubReg(c.DE.hi)
-		case 0x93:
-			name = "SUB E"
-			length, duration = c.SubReg(c.DE.lo)
-		case 0x94:
-			name = "SUB H"
-			length, duration = c.SubReg(c.HL.hi)
-		case 0x95:
-			name = "SUB L"
-			length, duration = c.SubReg(c.HL.lo)
-		case 0x96:
-			name = "SUB (HL)"
-			length = 1
-			duration = 8
-			sub := c.mmu.ReadByte(c.HL.word)
-			c.UnsetSubtractionFlag()
-			c.UnsetCarryFlag()
-			c.UnsetHalfCarryFlag()
-			c.UnsetZeroFlag()
-			if *c.AF.hi < sub {
-				c.SetCarryFlag()
-				c.SetHalfCarryFlag()
-			} else if *c.AF.hi == sub {
-				c.SetZeroFlag()
-			}
-			*c.AF.hi -= sub
-		case 0x97:
-			name = "SUB A"
-			length, duration = c.SubReg(c.AF.hi)
-
-		case 0xA8:
-			name = "XOR B"
-			length, duration = c.XorReg(c.BC.hi)
-		case 0xA9:
-			name = "XOR C"
-			length, duration = c.XorReg(c.BC.lo)
-		case 0xAA:
-			name = "XOR D"
-			length, duration = c.XorReg(c.DE.hi)
-		case 0xAB:
-			name = "XOR E"
-			length, duration = c.XorReg(c.DE.lo)
-		case 0xAC:
-			name = "XOR H"
-			length, duration = c.XorReg(c.HL.hi)
-		case 0xAD:
-			name = "XOR L"
-			length, duration = c.XorReg(c.HL.lo)
-		case 0xAE:
-			name = "XOR (HL)"
-			length = 1
-			duration = 8
-			byte_ := c.mmu.ReadByte(c.HL.word)
-			*c.AF.hi ^= byte_
-			if *c.AF.hi == 0 {
-				c.SetZeroFlag()
-			} else {
-				c.UnsetZeroFlag()
-			}
-			c.UnsetSubtractionFlag()
-			c.UnsetHalfCarryFlag()
-			c.UnsetCarryFlag()
-		case 0xAF:
-			name = "XOR A"
-			length, duration = c.XorReg(c.AF.hi)
-
-		case 0xB0:
-			name = "OR B"
-			length, duration = c.OrReg(c.BC.hi)
-		case 0xB1:
-			name = "OR C"
-			length, duration = c.OrReg(c.BC.lo)
-		case 0xB2:
-			name = "OR D"
-			length, duration = c.OrReg(c.DE.hi)
-		case 0xB3:
-			name = "OR E"
-			length, duration = c.OrReg(c.DE.lo)
-		case 0xB4:
-			name = "OR H"
-			length, duration = c.OrReg(c.HL.hi)
-		case 0xB5:
-			name = "OR L"
-			length, duration = c.OrReg(c.HL.lo)
-		case 0xB6:
-			name = "OR (HL)"
-			length = 1
-			duration = 8
-			byte_ := c.mmu.ReadByte(c.HL.word)
-			*c.AF.hi ^= byte_
-			if *c.AF.hi == 0 {
-				c.SetZeroFlag()
-			} else {
-				c.UnsetZeroFlag()
-			}
-			c.UnsetSubtractionFlag()
-			c.UnsetHalfCarryFlag()
-			c.UnsetCarryFlag()
-		case 0xB7:
-			name = "OR A"
-			length, duration = c.OrReg(c.AF.hi)
-
-		case 0xBE:
-			name = "CP (HL)"
-			length = 1
-			duration = 8
-			c.SetSubtractionFlag()
-			c.UnsetZeroFlag()
-			c.UnsetCarryFlag()
-			c.UnsetHalfCarryFlag()
-			val := c.mmu.ReadByte(c.HL.word)
-			if *c.AF.hi-val == 0 {
-				c.SetZeroFlag()
-			}
-			if *c.AF.hi < val {
-				c.SetCarryFlag()
-				c.SetHalfCarryFlag()
-			}
-		case 0xFE:
-			name = "CP d8"
-			length = 2
-			duration = 8
-			val := c.mmu.ReadByte(c.PC.word + 1)
-			c.SetSubtractionFlag()
-			c.UnsetZeroFlag()
-			c.UnsetCarryFlag()
-			c.UnsetHalfCarryFlag()
-			if *c.AF.hi-val == 0 {
-				c.SetZeroFlag()
-			}
-			if *c.AF.hi < val {
-				c.SetCarryFlag()
-				c.SetHalfCarryFlag()
-			}
-		case 0xFF:
-			name = "RST 38H"
-			length = 1
-			duration = 16
-		default:
-			name = "Not implemented"
-			length = 1
-			duration = 1
-			breaking = true
-		}
-	}
-
-	arg := uint16(0)
-	if length == 2 {
-		arg = uint16(c.mmu.ReadByte(c.PC.word + 1))
-	} else if length == 3 {
-		arg = c.mmu.ReadWord(c.PC.word + 1)
-	}
-
-	if !jump {
-		c.PC.word += uint16(length)
-	} else {
-		c.PC.word = jumpTo
-	}
-	return Instruction{name, location, arg, opcode, length, duration}, cbFlag, breaking
-}
-
-// CBInstruction processes an instruction in the same manner as Instruction. It is called if the previous byte is 0xCB.
-// It returns the opcode name, the length of the instruction minus one (need to figure out why), and the instruction duration.
-func (c *CPU) CBInstruction(opcode uint8, argByte uint8) (string, uint8, uint8) {
-	var name string
-	var length uint8
-	var duration uint8
-
-	switch opcode {
-	case 0x7C:
-		name = "BIT 7,H"
-		length = 2
-		duration = 8
-		c.UnsetSubtractionFlag()
-		c.SetHalfCarryFlag()
-		if CheckBit(c.HL.hi, 7) {
-			c.UnsetZeroFlag()
-		} else {
-			c.SetZeroFlag()
-		}
-	case 0x11:
-		name = "RL C"
-		length = 2
-		duration = 8
-		toCarry := false
-		if CheckBit(c.BC.lo, 7) {
-			toCarry = true
-		}
-		*c.BC.lo = bits.RotateLeft8(*c.BC.lo, 9)
-		if c.GetCarryFlag() {
-			*c.BC.lo |= 1
-		}
-		if toCarry {
-			c.SetCarryFlag()
-		} else {
-			c.UnsetCarryFlag()
-		}
-		c.UnsetHalfCarryFlag()
-		c.UnsetSubtractionFlag()
-	}
-	return name, length - 1, duration
 }
 
 // SetZeroFlag sets the zero flag to 1.
@@ -1067,8 +1166,8 @@ func (c *CPU) GetCarryFlag() bool {
 }
 
 // PrintInstruction prints the byte location, opcode, opcode name, length, and duration of the passed instruction.
-func (c *CPU) PrintInstruction(insCount uint64, i Instruction) {
-	fmt.Printf("Step %d, Byte %X\n\t%X|%s $%X: length: %d, duration: %d\n", insCount, i.location, i.opcode, i.name, i.arg, i.length, i.duration)
+func (c *CPU) PrintInstruction(name string) {
+	fmt.Printf("Step %d, %s", c.cycles, name)
 }
 
 // PrintRegisters prints the stack pointer location and data, and the values in each register except the flag register.

@@ -102,11 +102,18 @@ func (g *GameBoy) Start() {
 	cpuStepper := g.cpu.Start()
 	lcdStepper := g.lcd.Start()
 
-	i := uint64(0)
-	for {
-		i++
-		cpuStepper()
-		lcdStepper()
-	}
+	// i := uint64(0)
+	go func() {
+		for {
+			cpuStepper()
+		}
+	}()
+	go func() {
+		for {
+			lcdStepper()
+		}
+	}()
+
+	fmt.Scanln()
 
 }
