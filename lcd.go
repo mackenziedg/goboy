@@ -27,10 +27,10 @@ func (l *LCD) VBlankOff() {
 
 func (l *LCD) IncLY() {
 	ly := l.mmu.memory[0xFF44]
+	ly++
+
 	if ly == 154 {
 		ly = 0
-	} else {
-		ly++
 	}
 	l.mmu.memory[0xFF44] = ly
 

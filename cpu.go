@@ -1073,7 +1073,7 @@ func (c *CPU) Start() func() {
 
 		oldCycles = c.cycles
 		oldTime = time.Now()
-		// Procces the current opcode
+		// Proccess the current opcode
 		lastIns = c.opcodeMap[c.mmu.ReadByte(c.PC.word)]()
 		dt = time.Now().Sub(oldTime)
 
