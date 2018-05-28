@@ -40,7 +40,30 @@ func (l *LCD) IncLY() {
 		l.VBlankOff()
 	}
 	time.Sleep(16667 * time.Microsecond) // About 60 Hz
+}
 
+// LoadTileFromAddress loads a tile sized chunk of memory at a given address and processes it into an 8x8 tile as a 64-length array of uint8s.
+func (l *LCD) LoadTileFromAddress(address uint16) [64]uint8 {
+	tileData := l.mmu.memory[address : address+16]
+	tile := [64]uint8{}
+
+	var row1, row2 uint8
+	for i := uint8(0); i < 8; i++ {
+		row1 = tileData[2*i]
+		row2 = tileData[2*i+1]
+
+		for b := uint8(0); b < 8; b++ {
+			// TODO: Maybe do this with like shifting mask per loop?
+			if CheckBit(&row1, b) {
+				tile[i*8+b] |= 2
+			}
+			if CheckBit(&row2, b) {
+				tile[i*8+b] |= 1
+			}
+		}
+	}
+
+	return tile
 }
 
 func (l *LCD) Start() func() {
@@ -53,6 +76,9 @@ func (l *LCD) Start() func() {
 		l.IncLY()
 
 		if i%60 == 0 {
+			for j := uint16(0x8000); j < 0x8FFF; j += 0x10 {
+				l.LoadTileFromAddress(0x8010 + j)
+			}
 			fmt.Println("60 screen updates in", time.Now().Sub(start))
 			start = time.Now()
 		}
