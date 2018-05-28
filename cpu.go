@@ -239,7 +239,7 @@ func (c *CPU) Start() func() uint8 {
 	}
 
 	cb := false
-	breaking := true
+	breaking := false
 	curIns := Instruction{}
 	var insCount uint64 = 0
 
@@ -247,7 +247,8 @@ func (c *CPU) Start() func() uint8 {
 		insCount++
 
 		curIns, cb, breaking = c.Instruction(c.mmu.ReadByte(c.PC.word), cb, breaking)
-		if curIns.location > 0x54 && curIns.location < 0x94 {
+
+		if breaking {
 			c.PrintInstruction(insCount, curIns)
 			c.PrintRegisters()
 			c.PrintFlagRegister()
@@ -323,18 +324,18 @@ func (c *CPU) Instruction(opcode uint8, cbFlag bool, breaking bool) (Instruction
 		case 0x03:
 			name = "INC BC"
 			length, duration = c.Inc16(&c.BC.word)
-		case 0x13:
-			name = "DEC DE"
-			length, duration = c.Inc16(&c.DE.word)
-		case 0x23:
-			name = "INC HL"
-			length, duration = c.Inc16(&c.HL.word)
 		case 0x0B:
 			name = "DEC BC"
 			length, duration = c.Dec16(&c.BC.word)
+		case 0x13:
+			name = "INC DE"
+			length, duration = c.Inc16(&c.DE.word)
 		case 0x1B:
 			name = "DEC DE"
 			length, duration = c.Dec16(&c.DE.word)
+		case 0x23:
+			name = "INC HL"
+			length, duration = c.Inc16(&c.HL.word)
 		case 0x2B:
 			name = "DEC HL"
 			length, duration = c.Dec16(&c.HL.word)
@@ -903,24 +904,38 @@ func (c *CPU) Instruction(opcode uint8, cbFlag bool, breaking bool) (Instruction
 		case 0xB7:
 			name = "OR A"
 			length, duration = c.OrReg(c.AF.hi)
-		case 0xFE:
-			name = "CP d8"
-			length = 2
+
+		case 0xBE:
+			name = "CP (HL)"
+			length = 1
 			duration = 8
-			address := uint16(c.mmu.ReadByte(c.PC.word + 1))
-			val := c.mmu.ReadByte(address)
 			c.SetSubtractionFlag()
-			if *c.AF.hi == val {
+			c.UnsetZeroFlag()
+			c.UnsetCarryFlag()
+			c.UnsetHalfCarryFlag()
+			val := c.mmu.ReadByte(c.HL.word)
+			if *c.AF.hi-val == 0 {
 				c.SetZeroFlag()
-			} else {
-				c.UnsetZeroFlag()
 			}
 			if *c.AF.hi < val {
 				c.SetCarryFlag()
 				c.SetHalfCarryFlag()
-			} else {
-				c.UnsetCarryFlag()
-				c.UnsetHalfCarryFlag()
+			}
+		case 0xFE:
+			name = "CP d8"
+			length = 2
+			duration = 8
+			val := c.mmu.ReadByte(c.PC.word + 1)
+			c.SetSubtractionFlag()
+			c.UnsetZeroFlag()
+			c.UnsetCarryFlag()
+			c.UnsetHalfCarryFlag()
+			if *c.AF.hi-val == 0 {
+				c.SetZeroFlag()
+			}
+			if *c.AF.hi < val {
+				c.SetCarryFlag()
+				c.SetHalfCarryFlag()
 			}
 		case 0xFF:
 			name = "RST 38H"
@@ -1053,7 +1068,7 @@ func (c *CPU) GetCarryFlag() bool {
 
 // PrintInstruction prints the byte location, opcode, opcode name, length, and duration of the passed instruction.
 func (c *CPU) PrintInstruction(insCount uint64, i Instruction) {
-	fmt.Printf("Step %d, Byte %X\n\t%X|%s $%X: length: %d, duration: %d/%d\n", insCount, i.location, i.opcode, i.name, i.arg, i.length, i.duration)
+	fmt.Printf("Step %d, Byte %X\n\t%X|%s $%X: length: %d, duration: %d\n", insCount, i.location, i.opcode, i.name, i.arg, i.length, i.duration)
 }
 
 // PrintRegisters prints the stack pointer location and data, and the values in each register except the flag register.
