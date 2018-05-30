@@ -1064,24 +1064,25 @@ func (c *CPU) Start() func() {
 
 	var insCount = uint64(0)
 	start := time.Now()
-	var timeDelay time.Duration
-	var dt time.Duration
-	oldTime := time.Now()
-	oldCycles := uint64(0)
+	// var timeDelay time.Duration
+	// var dt time.Duration
+	// oldTime := time.Now()
+	// oldCycles := uint64(0)
 
 	return func() {
 
-		oldCycles = c.cycles
-		oldTime = time.Now()
+		// oldCycles = c.cycles
+		// oldTime = time.Now()
 		// Proccess the current opcode
 		lastIns = c.opcodeMap[c.mmu.ReadByte(c.PC.word)]()
-		dt = time.Now().Sub(oldTime)
+		time.Sleep(100 * time.Microsecond)
+		// dt = time.Now().Sub(oldTime)
 
-		timeDelay = time.Duration(c.cycles-oldCycles) * (65 * time.Nanosecond)
-		if dt < timeDelay {
-			// fmt.Println(timeDelay - dt)
-			time.Sleep(timeDelay - dt)
-		}
+		// timeDelay = time.Duration(c.cycles-oldCycles) * (65 * time.Nanosecond)
+		// if dt < timeDelay {
+		// 	// fmt.Println(timeDelay - dt)
+		// 	time.Sleep(timeDelay - dt)
+		// }
 
 		if c.cycles > 5000000 {
 			fmt.Println("5M CPU ops in", time.Now().Sub(start))

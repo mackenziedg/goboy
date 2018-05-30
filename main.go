@@ -6,12 +6,17 @@ func check(e error) {
 	}
 }
 
+var done = make(chan int)
+
 func main() {
 	// Create a new GameBoy, clear it, and read in cartridge data.
 	var gb = &(GameBoy{})
-	gb.Reset()
-	gb.LoadROMFromFile("./data/Tetris.gb")
+	var sdl = &(SDL{})
+	start := sdl.Start(gb)
 
-	// Start the gameboy
-	gb.Start()
+	go func() {
+		start()
+	}()
+
+	<-done
 }

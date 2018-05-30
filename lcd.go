@@ -39,15 +39,12 @@ func (l *LCD) IncLY() {
 	} else {
 		l.VBlankOff()
 	}
-	time.Sleep(16667 * time.Microsecond) // About 60 Hz
+	time.Sleep(16750 * time.Microsecond) // About 59.7 Hz
 }
 
-// LoadTileFromAddress loads a tile sized chunk of memory at a given address and processes it into an 8x8 tile as a 64-length array of uint8s.
-func (l *LCD) LoadTileFromAddress(address uint16) [64]uint8 {
-	tileData := l.mmu.memory[address : address+16]
-	tile := [64]uint8{}
-
+func (l *LCD) ConvertTileToPixels(tileData []uint8) [64]uint8 {
 	var row1, row2 uint8
+	tile := [64]uint8{}
 	for i := uint8(0); i < 8; i++ {
 		row1 = tileData[2*i]
 		row2 = tileData[2*i+1]
@@ -55,15 +52,48 @@ func (l *LCD) LoadTileFromAddress(address uint16) [64]uint8 {
 		for b := uint8(0); b < 8; b++ {
 			// TODO: Maybe do this with like shifting mask per loop?
 			if CheckBit(&row1, b) {
-				tile[i*8+b] |= 2
+				tile[i*8+b] |= 1
 			}
 			if CheckBit(&row2, b) {
-				tile[i*8+b] |= 1
+				tile[i*8+b] |= 2
 			}
 		}
 	}
-
 	return tile
+}
+
+// LoadTileFromAddress loads a tile sized chunk of memory at a given address and processes it into an 8x8 tile as a 64-length array of uint8s.
+func (l *LCD) LoadTileFromAddress(address uint16) [64]uint8 {
+	tileData := l.mmu.memory[address : address+16]
+
+	return l.ConvertTileToPixels(tileData)
+}
+
+func (l *LCD) GetTileMap() [0x10000]uint8 {
+	//Tile map in 0x9800-0x9BFF
+
+	bgPixels := [0x10000]uint8{}
+
+	// Loop over tilemap. Each index in the map points to an 8x8 tile.
+	for ix, v := range l.mmu.memory[0x9800:0x9C00] {
+		ULX := (ix * 8) % 256
+		ULY := (ix / 32) * 2048
+		curTile := l.LoadTileFromAddress(0x8010 + uint16(v))
+		for j, px := range curTile {
+			pxid := (j/8)*256 + j%8
+			bgPixels[ULX+ULY+pxid] = px
+		}
+	}
+
+	return bgPixels
+}
+
+func (l *LCD) SCX() uint8 {
+	return l.mmu.ReadByte(0xFF43)
+}
+
+func (l *LCD) SCY() uint8 {
+	return l.mmu.ReadByte(0xFF42)
 }
 
 func (l *LCD) Start() func() {
@@ -76,9 +106,7 @@ func (l *LCD) Start() func() {
 		l.IncLY()
 
 		if i%60 == 0 {
-			for j := uint16(0x8000); j < 0x8FFF; j += 0x10 {
-				l.LoadTileFromAddress(0x8010 + j)
-			}
+			// panic("")
 			fmt.Println("60 screen updates in", time.Now().Sub(start))
 			start = time.Now()
 		}

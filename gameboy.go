@@ -94,7 +94,6 @@ func (g *GameBoy) LoadROMFromFile(path string) {
 
 	g.mmu.LoadCartridgeData(dat)
 	g.CheckCartridgeHeader()
-	g.Start()
 }
 
 // Starts the GameBoy.
@@ -107,13 +106,13 @@ func (g *GameBoy) Start() {
 		for {
 			cpuStepper()
 		}
+		<-done
 	}()
 	go func() {
 		for {
 			lcdStepper()
 		}
+		<-done
 	}()
-
-	fmt.Scanln()
 
 }
