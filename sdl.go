@@ -60,7 +60,7 @@ func (s *SDL) Start(gb *GameBoy) func() {
 			SCY := gb.mmu.ReadByte(0xFF42)
 
 			// Dump screen and crash when finished booting
-			// if gb.cpu.PC.word > 0x64 && gb.cpu.PC.word < 0x93 {
+			// if gb.cpu.PC.word > 0x100 {
 			// 	f, err := os.Create("./BGScreenDump")
 			// 	check(err)
 			// 	defer f.Close()

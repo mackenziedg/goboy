@@ -1092,9 +1092,13 @@ func (c *CPU) Start() func() {
 
 		lastIns = c.opcodeMap[c.mmu.ReadByte(c.PC.word)]()
 
-		// if c.PC.word == 0x100 {
-		// c.breaking = true
-		// }
+		if c.PC.word == 0x100 {
+			c.breaking = true
+		}
+
+		if c.cycles%1000000 == 0 {
+			fmt.Println(c.cycles, "cycles.")
+		}
 
 		if c.breaking {
 			fmt.Printf("%X\t", c.PC.word)
