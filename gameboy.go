@@ -15,7 +15,7 @@ type GameBoy struct {
 	apu *APU
 }
 
-// Reset() creates new hardware, links the memory to the processors, and resets each component.
+// Reset creates new hardware, links the memory to the processors, and resets each component.
 func (g *GameBoy) Reset() {
 	g.cpu = &(CPU{})
 	g.mmu = &(MMU{})
@@ -28,7 +28,7 @@ func (g *GameBoy) Reset() {
 	g.mmu.Reset()
 }
 
-// Checks and prints the cartridge header information,
+// CheckCartridgeHeader checks and prints the cartridge header information,
 //including game title, memory type, and size.
 func (g *GameBoy) CheckCartridgeHeader() {
 
@@ -52,7 +52,7 @@ func (g *GameBoy) CheckCartridgeHeader() {
 	case 0x1:
 		romSizeString = "64 KB"
 	default:
-		panic(fmt.Errorf("ROM size %X not supported.", memInfoBytes[1]))
+		panic(fmt.Errorf("cartridge ROM size %X not supported", memInfoBytes[1]))
 
 	}
 	fmt.Printf("ROM Size is %s.\n", romSizeString)
@@ -62,7 +62,7 @@ func (g *GameBoy) CheckCartridgeHeader() {
 	case 0x0:
 		ramSizeString = "No cartridge RAM."
 	default:
-		panic(fmt.Errorf("RAM not supported."))
+		panic(fmt.Errorf("cartridge RAM not supported"))
 	}
 	fmt.Printf("%s\n", ramSizeString)
 
@@ -81,7 +81,7 @@ func (g *GameBoy) CheckCartridgeHeader() {
 	fmt.Print("!\n========================================\n")
 }
 
-// LoadROMFromFile() loads a binary gameboy data file from a filepath string.
+// LoadROMFromFile loads a binary GameBoy data file from a filepath string.
 // Panics if any file read errors occur.
 func (g *GameBoy) LoadROMFromFile(path string) {
 	pathSplit := strings.Split(path, ",")
@@ -96,7 +96,7 @@ func (g *GameBoy) LoadROMFromFile(path string) {
 	g.CheckCartridgeHeader()
 }
 
-// Starts the GameBoy.
+// Start starts the GameBoy.
 func (g *GameBoy) Start() {
 	cpuStepper := g.cpu.Start()
 	lcdStepper := g.lcd.Start()
@@ -114,5 +114,4 @@ func (g *GameBoy) Start() {
 		}
 		<-done
 	}()
-
 }

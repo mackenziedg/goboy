@@ -8,8 +8,11 @@ import (
 	"github.com/veandco/go-sdl2/sdl"
 )
 
+// SDL is a struct which acts as the display for the GameBoy
 type SDL struct{}
 
+// Start acts as a wrapper for restarting and loading the GameBoy.
+// TODO: This is not how it should work long term, but for now we're only ever loading one file so eh...
 func (s *SDL) Start(gb *GameBoy) func() {
 	gb.Reset()
 	gb.LoadROMFromFile("./data/Tetris.gb")
@@ -22,9 +25,7 @@ func (s *SDL) Start(gb *GameBoy) func() {
 	defer window.Destroy()
 
 	surface, err := window.GetSurface()
-	if err != nil {
-		panic(err)
-	}
+	check(err)
 	surface.FillRect(nil, 0)
 
 	rect := sdl.Rect{0, 0, 200, 200}
@@ -36,7 +37,7 @@ func (s *SDL) Start(gb *GameBoy) func() {
 
 	return func() {
 
-		var winTitle string = "SDL2 GFX"
+		var winTitle = "SDL2 GFX"
 		var winWidth, winHeight int32 = 256, 256
 		var window *sdl.Window
 		var renderer *sdl.Renderer
@@ -73,15 +74,16 @@ func (s *SDL) Start(gb *GameBoy) func() {
 	}
 }
 
+// ConvertColor is a helper class which converts a pixel value 0-3 into the corresponding display color for the screen.
 func (s *SDL) ConvertColor(p uint8) sdl.Color {
 	switch p {
 	case 0:
-		return sdl.Color{255, 255, 255, 255}
+		return sdl.Color{R: 255, G: 255, B: 255, A: 255}
 	case 1:
-		return sdl.Color{170, 170, 170, 255}
+		return sdl.Color{R: 170, G: 170, B: 170, A: 255}
 	case 2:
-		return sdl.Color{80, 80, 80, 255}
+		return sdl.Color{R: 80, G: 80, B: 80, A: 255}
 	default:
-		return sdl.Color{0, 0, 0, 255}
+		return sdl.Color{R: 0, G: 0, B: 0, A: 255}
 	}
 }

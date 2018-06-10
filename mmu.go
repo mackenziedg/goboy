@@ -2,7 +2,7 @@ package main
 
 import "math/rand"
 
-// The memory is fixed at pow(2, 16) bytes
+// MEMORYSIZE is fixed at pow(2, 16) bytes
 const MEMORYSIZE = 0x10000
 
 // MMU is a struct with a fixed-size memory and access functions
@@ -13,7 +13,7 @@ type MMU struct {
 // Reset initializes the memory of an MMU to random 8-bit integers.
 func (m *MMU) Reset() {
 	m.memory = [MEMORYSIZE]uint8{}
-	for i, _ := range m.memory {
+	for i := range m.memory {
 		m.memory[i] = uint8(rand.Intn(0x100))
 	}
 }
