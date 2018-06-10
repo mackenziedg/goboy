@@ -42,6 +42,7 @@ func (l *LCD) IncLY() {
 	time.Sleep(16750 * time.Microsecond) // About 59.7 Hz
 }
 
+// ConvertTileToPixels converts an array of tile data into an array of pixel values
 func (l *LCD) ConvertTileToPixels(tileData []uint8) [64]uint8 {
 	var row1, row2 uint8
 	tile := [64]uint8{}
@@ -52,10 +53,10 @@ func (l *LCD) ConvertTileToPixels(tileData []uint8) [64]uint8 {
 		for b := uint8(0); b < 8; b++ {
 			// TODO: Maybe do this with like shifting mask per loop?
 			if CheckBit(&row1, b) {
-				tile[i*8+b] |= 1
+				tile[i*8+(7-b)] |= 1
 			}
 			if CheckBit(&row2, b) {
-				tile[i*8+b] |= 2
+				tile[i*8+(7-b)] |= 2
 			}
 		}
 	}
@@ -69,9 +70,10 @@ func (l *LCD) LoadTileFromAddress(address uint16) [64]uint8 {
 	return l.ConvertTileToPixels(tileData)
 }
 
-func (l *LCD) GetTileMap() [0x10000]uint8 {
-	//Tile map in 0x9800-0x9BFF
+// GetBGPixelArray returns an array of pixels which constitute the background of the GameBoy display.
+func (l *LCD) GetBGPixelArray() [0x10000]uint8 {
 
+	//Tile map in 0x9800-0x9BFF
 	bgPixels := [0x10000]uint8{}
 
 	// Loop over tilemap. Each index in the map points to an 8x8 tile.
@@ -88,14 +90,6 @@ func (l *LCD) GetTileMap() [0x10000]uint8 {
 	return bgPixels
 }
 
-func (l *LCD) SCX() uint8 {
-	return l.mmu.ReadByte(0xFF43)
-}
-
-func (l *LCD) SCY() uint8 {
-	return l.mmu.ReadByte(0xFF42)
-}
-
 func (l *LCD) Start() func() {
 
 	i := uint64(0)
@@ -106,7 +100,6 @@ func (l *LCD) Start() func() {
 		l.IncLY()
 
 		if i%60 == 0 {
-			// panic("")
 			fmt.Println("60 screen updates in", time.Now().Sub(start))
 			start = time.Now()
 		}

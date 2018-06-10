@@ -1,11 +1,19 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/veandco/go-sdl2/gfx"
 	"github.com/veandco/go-sdl2/sdl"
+)
+
+// Define the pixel width and height of the GameBoy display
+const (
+	SCREENWIDTH  = 160
+	SCREENHEIGHT = 144
 )
 
 // SDL is a struct which acts as the display for the GameBoy
@@ -17,28 +25,13 @@ func (s *SDL) Start(gb *GameBoy) func() {
 	gb.Reset()
 	gb.LoadROMFromFile("./data/Tetris.gb")
 
-	check(sdl.Init(sdl.INIT_EVERYTHING))
-	defer sdl.Quit()
-
-	window, err := sdl.CreateWindow("GoBoy", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, 800, 600, sdl.WINDOW_SHOWN)
-	check(err)
-	defer window.Destroy()
-
-	surface, err := window.GetSurface()
-	check(err)
-	surface.FillRect(nil, 0)
-
-	rect := sdl.Rect{X: 0, Y: 0, W: 200, H: 200}
-	surface.FillRect(&rect, 0xffff0000)
-	window.UpdateSurface()
-
 	// Start the gameboy
 	gb.Start()
 
 	return func() {
 
 		var winTitle = "SDL2 GFX"
-		var winWidth, winHeight int32 = 256, 256
+		var bgPixelWidth = 256
 		var window *sdl.Window
 		var renderer *sdl.Renderer
 		var err error
@@ -48,7 +41,7 @@ func (s *SDL) Start(gb *GameBoy) func() {
 		}
 		defer sdl.Quit()
 
-		if window, err = sdl.CreateWindow(winTitle, sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, winWidth, winHeight, sdl.WINDOW_SHOWN); err != nil {
+		if window, err = sdl.CreateWindow(winTitle, sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, SCREENWIDTH, SCREENHEIGHT, sdl.WINDOW_SHOWN); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to create window: %s\n", err)
 		}
 		defer window.Destroy()
@@ -64,13 +57,79 @@ func (s *SDL) Start(gb *GameBoy) func() {
 		pxArray := [0x10000]uint8{}
 		for {
 			renderer.Clear()
-			pxArray = gb.lcd.GetTileMap()
-			for i, v := range pxArray {
-				// fmt.Println(i/256, i%256)
-				gfx.PixelColor(renderer, int32(i%256), int32(i/256), s.ConvertColor(v))
+			pxArray = gb.lcd.GetBGPixelArray()
+			SCX := gb.mmu.ReadByte(0xFF43)
+			SCY := gb.mmu.ReadByte(0xFF42)
+
+			// Dump screen and crash when finished booting
+			if gb.cpu.PC.word > 0x64 && gb.cpu.PC.word < 0x93 {
+				f, err := os.Create("./BGScreenDump")
+				check(err)
+				defer f.Close()
+
+				var vramPixels bytes.Buffer
+
+				for y := 0; y < 256; y++ {
+					for x := 0; x < 256; x++ {
+						vramPixels.WriteString(strconv.Itoa(int(pxArray[x+SCREENWIDTH*y])))
+					}
+					vramPixels.WriteString("\n")
+				}
+				f.WriteString(vramPixels.String())
+
+				f2, err2 := os.Create("./TileMapDump")
+				check(err2)
+				defer f.Close()
+
+				var tileMapPixels bytes.Buffer
+				tileMap := gb.mmu.memory[0x9800:0x9C00]
+
+				for y := 0; y < 32; y++ {
+					for x := 0; x < 32; x++ {
+						s := strconv.FormatInt(int64(tileMap[x+32*y]), 16)
+
+						if len(s) == 1 {
+							s = "0" + s
+						}
+						s = s + " "
+						tileMapPixels.WriteString(s)
+					}
+					tileMapPixels.WriteString("\n")
+				}
+				f2.WriteString(tileMapPixels.String())
+
+				f3, err3 := os.Create("./Tiles")
+				check(err3)
+				defer f.Close()
+
+				var tilesBuf bytes.Buffer
+
+				for tid := 0; tid < 19; tid++ {
+					tile := gb.lcd.LoadTileFromAddress(0x8000 + uint16(tid*16))
+
+					tilesBuf.WriteString(strconv.Itoa(tid))
+					for i := 0; i < 64; i++ {
+						s := strconv.Itoa(int(tile[i]))
+
+						if i%8 == 0 {
+							tilesBuf.WriteString("\n")
+						}
+						tilesBuf.WriteString(s)
+					}
+					tilesBuf.WriteString("\n\n")
+				}
+				f3.WriteString(tilesBuf.String())
+
+				panic("finished booting")
 			}
+
+			for x := uint8(0); x < SCREENWIDTH; x++ {
+				for y := uint8(0); y < SCREENHEIGHT; y++ {
+					gfx.PixelColor(renderer, int32(SCX+x), int32(SCY+y), s.ConvertColor(pxArray[int(SCX+x)+bgPixelWidth*int(SCX+y)]))
+				}
+			}
+
 			renderer.Present()
-			// fmt.Printf("SCX: %X, SCY: %X\n", gb.mmu.ReadByte(0xFF42), gb.mmu.ReadByte(0xFF43))
 		}
 	}
 }

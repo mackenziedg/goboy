@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math/bits"
-	"time"
 	"unsafe"
 )
 
@@ -208,6 +207,7 @@ func (c *CPU) SetupOpcodeMap() {
 		c.LdByte(c.HL.lo)
 		return "LD L,d8"
 	}
+
 	// LD R,R
 	c.opcodeMap[0x7F] = func() string {
 		c.LdReg8(c.AF.hi, c.AF.hi)
@@ -421,7 +421,7 @@ func (c *CPU) SetupOpcodeMap() {
 	}
 	c.opcodeMap[0x2A] = func() string {
 		c.LdReg8Adr(c.AF.hi, c.HL.word)
-		c.Dec16(&c.HL.word)
+		c.Inc16(&c.HL.word)
 		return "LD A,(HL+)"
 	}
 	c.opcodeMap[0x3A] = func() string {
@@ -542,22 +542,9 @@ func (c *CPU) SetupOpcodeMap() {
 		return "CALL a16"
 	}
 
-	// Misc
-	c.opcodeMap[0x00] = func() string {
-		c.PC.word++
-		c.cycles += 4
-		return "NOP"
-	}
-	c.opcodeMap[0xCB] = func() string {
-		cbop := c.cbOpcodeMap[c.mmu.ReadByte(c.PC.word+1)]()
-		c.PC.word++ // The length is 2 in total but the CB instruction prefix is one byte and the actual instruction is one byte. Since some of the CB instructions call functions which increment c.PC, setting this to increment 1 works best.
-		c.cycles += 4
-		return "CB " + cbop
-	}
-
 	// Arithmetic
 	c.opcodeMap[0x07] = func() string {
-		c.RotateCarry(c.AF.hi, 8)
+		c.RotateCarry(c.AF.hi, 9)
 		return "RLCA"
 	}
 	c.opcodeMap[0x17] = func() string {
@@ -570,7 +557,7 @@ func (c *CPU) SetupOpcodeMap() {
 		return "RRA"
 	}
 	c.opcodeMap[0x0F] = func() string {
-		c.RotateCarry(c.AF.hi, -8)
+		c.RotateCarry(c.AF.hi, -9)
 		return "RRCA"
 	}
 
@@ -781,6 +768,26 @@ func (c *CPU) SetupOpcodeMap() {
 		return "CP d8"
 	}
 
+	// Misc.
+	c.opcodeMap[0xF3] = func() string {
+		//TODO: Implement
+		fmt.Println("Disable Interrupts")
+		c.PC.word++
+		c.cycles += 4
+		return "DI"
+	}
+	c.opcodeMap[0x00] = func() string {
+		c.PC.word++
+		c.cycles += 4
+		return "NOP"
+	}
+	c.opcodeMap[0xCB] = func() string {
+		cbop := c.cbOpcodeMap[c.mmu.ReadByte(c.PC.word+1)]()
+		c.PC.word++ // The length is 2 in total but the CB instruction prefix is one byte and the actual instruction is one byte. Since some of the CB instructions call functions which increment c.PC, setting this to increment 1 works best.
+		c.cycles += 4
+		return "CB " + cbop
+	}
+
 	// CB opcode map setup here
 	c.cbOpcodeMap = make(map[uint8]func() string)
 
@@ -828,14 +835,25 @@ func (c *CPU) Rotate(register *uint8, amt int) {
 		carryBit = 7
 	}
 
-	if CheckBit(c.AF.hi, carryBit) {
+	if CheckBit(register, carryBit) {
 		toCarry = true
 	}
 
-	*c.AF.hi = bits.RotateLeft8(*c.AF.hi, amt)
+	*register = bits.RotateLeft8(*register, amt)
 
+	// Set the carryBit to 1 or 0 depending on the CarryFlag value
 	if c.GetCarryFlag() {
-		*c.AF.hi |= BitVal(carryBit)
+		if amt > 1 {
+			*register |= 1
+		} else {
+			*register |= 128
+		}
+	} else {
+		if amt > 1 {
+			*register &= 254
+		} else {
+			*register &= 127
+		}
 	}
 
 	if toCarry {
@@ -843,7 +861,11 @@ func (c *CPU) Rotate(register *uint8, amt int) {
 	} else {
 		c.UnsetCarryFlag()
 	}
-	c.UnsetZeroFlag()
+	if *register == 0 {
+		c.UnsetZeroFlag()
+	} else {
+		c.SetZeroFlag()
+	}
 	c.UnsetHalfCarryFlag()
 	c.UnsetSubtractionFlag()
 
@@ -857,12 +879,12 @@ func (c *CPU) RotateCarry(register *uint8, amt int) {
 	if amt > 1 {
 		carryBit = 7
 	}
-	if CheckBit(c.AF.hi, carryBit) {
+	if CheckBit(register, carryBit) {
 		c.SetCarryFlag()
 	} else {
 		c.UnsetCarryFlag()
 	}
-	*c.AF.hi = bits.RotateLeft8(*c.AF.hi, amt)
+	*register = bits.RotateLeft8(*register, amt)
 	c.UnsetZeroFlag()
 	c.UnsetHalfCarryFlag()
 	c.UnsetSubtractionFlag()
@@ -1066,37 +1088,13 @@ func (c *CPU) Start() func() {
 
 	var lastIns string
 
-	var insCount = uint64(0)
-	start := time.Now()
-	var timeDelay time.Duration
-	var dt time.Duration
-	oldTime := time.Now()
-	oldCycles := uint64(0)
-
 	return func() {
 
-		oldCycles = c.cycles
-		oldTime = time.Now()
-		// Proccess the current opcode
 		lastIns = c.opcodeMap[c.mmu.ReadByte(c.PC.word)]()
-		dt = time.Now().Sub(oldTime)
 
-		timeDelay = time.Duration(c.cycles-oldCycles) * (20 * time.Nanosecond)
-		if dt < timeDelay {
-			// fmt.Println(timeDelay - dt)
-			time.Sleep(timeDelay - dt)
-		}
-
-		if c.cycles > 5000000 {
-			fmt.Println("5M CPU ops in", time.Now().Sub(start))
-			c.cycles = 0
-			start = time.Now()
-		}
-		insCount++
-
-		if c.PC.word == 0x100 {
-			c.breaking = true
-		}
+		// if c.PC.word == 0x100 {
+		// c.breaking = true
+		// }
 
 		if c.breaking {
 			fmt.Printf("%X\t", c.PC.word)
