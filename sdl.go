@@ -1,10 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/veandco/go-sdl2/gfx"
 	"github.com/veandco/go-sdl2/sdl"
@@ -62,66 +60,45 @@ func (s *SDL) Start(gb *GameBoy) func() {
 			SCY := gb.mmu.ReadByte(0xFF42)
 
 			// Dump screen and crash when finished booting
-			if gb.cpu.PC.word > 0x64 && gb.cpu.PC.word < 0x93 {
-				f, err := os.Create("./BGScreenDump")
-				check(err)
-				defer f.Close()
+			// if gb.cpu.PC.word > 0x64 && gb.cpu.PC.word < 0x93 {
+			// 	f, err := os.Create("./BGScreenDump")
+			// 	check(err)
+			// 	defer f.Close()
 
-				var vramPixels bytes.Buffer
+			// 	var vramPixels bytes.Buffer
 
-				for y := 0; y < 256; y++ {
-					for x := 0; x < 256; x++ {
-						vramPixels.WriteString(strconv.Itoa(int(pxArray[x+SCREENWIDTH*y])))
-					}
-					vramPixels.WriteString("\n")
-				}
-				f.WriteString(vramPixels.String())
+			// 	for y := 0; y < 256; y++ {
+			// 		for x := 0; x < 256; x++ {
+			// 			vramPixels.WriteString(strconv.Itoa(int(pxArray[x+SCREENWIDTH*y])))
+			// 		}
+			// 		vramPixels.WriteString("\n")
+			// 	}
+			// 	f.WriteString(vramPixels.String())
 
-				f2, err2 := os.Create("./TileMapDump")
-				check(err2)
-				defer f.Close()
+			// 	f3, err3 := os.Create("./Tiles")
+			// 	check(err3)
+			// 	defer f.Close()
 
-				var tileMapPixels bytes.Buffer
-				tileMap := gb.mmu.memory[0x9800:0x9C00]
+			// 	var tilesBuf bytes.Buffer
 
-				for y := 0; y < 32; y++ {
-					for x := 0; x < 32; x++ {
-						s := strconv.FormatInt(int64(tileMap[x+32*y]), 16)
+			// 	for tid := 0; tid < 19; tid++ {
+			// 		tile := gb.lcd.LoadTileFromAddress(0x8000 + uint16(tid*16))
 
-						if len(s) == 1 {
-							s = "0" + s
-						}
-						s = s + " "
-						tileMapPixels.WriteString(s)
-					}
-					tileMapPixels.WriteString("\n")
-				}
-				f2.WriteString(tileMapPixels.String())
+			// 		tilesBuf.WriteString(strconv.Itoa(tid))
+			// 		for i := 0; i < 64; i++ {
+			// 			s := strconv.Itoa(int(tile[i]))
 
-				f3, err3 := os.Create("./Tiles")
-				check(err3)
-				defer f.Close()
+			// 			if i%8 == 0 {
+			// 				tilesBuf.WriteString("\n")
+			// 			}
+			// 			tilesBuf.WriteString(s)
+			// 		}
+			// 		tilesBuf.WriteString("\n\n")
+			// 	}
+			// 	f3.WriteString(tilesBuf.String())
 
-				var tilesBuf bytes.Buffer
-
-				for tid := 0; tid < 19; tid++ {
-					tile := gb.lcd.LoadTileFromAddress(0x8000 + uint16(tid*16))
-
-					tilesBuf.WriteString(strconv.Itoa(tid))
-					for i := 0; i < 64; i++ {
-						s := strconv.Itoa(int(tile[i]))
-
-						if i%8 == 0 {
-							tilesBuf.WriteString("\n")
-						}
-						tilesBuf.WriteString(s)
-					}
-					tilesBuf.WriteString("\n\n")
-				}
-				f3.WriteString(tilesBuf.String())
-
-				panic("finished booting")
-			}
+			// 	panic("finished booting")
+			// }
 
 			for x := uint8(0); x < SCREENWIDTH; x++ {
 				for y := uint8(0); y < SCREENHEIGHT; y++ {

@@ -80,7 +80,7 @@ func (l *LCD) GetBGPixelArray() [0x10000]uint8 {
 	for ix, v := range l.mmu.memory[0x9800:0x9C00] {
 		ULX := (ix * 8) % 256
 		ULY := (ix / 32) * 2048
-		curTile := l.LoadTileFromAddress(0x8010 + uint16(v))
+		curTile := l.LoadTileFromAddress(0x8000 + uint16(16*v))
 		for j, px := range curTile {
 			pxid := (j/8)*256 + j%8
 			bgPixels[ULX+ULY+pxid] = px
