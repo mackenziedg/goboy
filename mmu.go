@@ -37,7 +37,7 @@ func (m *MMU) WriteByte(address uint16, value uint8) {
 }
 
 // ReadWord reads a 16-bit word from memory starting at a given address.
-// It returns a pair in order lowByte, highByte.
+// It returns a word in order lowByte, highByte.
 func (m *MMU) ReadWord(address uint16) uint16 {
 	lowByte := m.memory[address]
 	highByte := m.memory[address+1]

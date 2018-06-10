@@ -9,12 +9,14 @@ import (
 )
 
 // Flag constants are the bit number of the F register corresponding to that flag.
-const Z = 7
-const N = 6
-const H = 5
-const C = 4
+const (
+	Z = 7
+	N = 6
+	H = 5
+	C = 4
+)
 
-// The bootloader is 0x100 bytes long.
+// BLSIZE is the bootloader size, 0x100 bytes long.
 const BLSIZE = 0x100
 
 // CPU consists of a set of registers, a pointer to the MMU unit, and bootloader data
@@ -38,7 +40,7 @@ type CPU struct {
 	breaking bool
 }
 
-// Only used for printing instruction information
+// Instruction is only used for printing instruction information
 type Instruction struct {
 	name     string
 	location uint16
@@ -48,7 +50,7 @@ type Instruction struct {
 	duration uint8
 }
 
-// Stupid bithacking used to have the hi and lo values be the
+// Register is a stupid bithack version of a C-type union used to have the hi and lo values be the
 // high and low bytes of word so changing any will affect the other automatically
 type Register struct {
 	hi   *uint8
@@ -65,6 +67,8 @@ func (c *CPU) Reset(mmu *MMU) {
 		c.bootloader[i] = v
 	}
 
+	// These register setups enable the C-type union stuff.
+	// TODO: Make sure this still works on other systems.
 	c.AF.word = 0x0
 	c.AF.lo = (*uint8)(unsafe.Pointer(&c.AF.word))
 	c.AF.hi = (*uint8)(unsafe.Pointer(uintptr(unsafe.Pointer(&c.AF.word)) + unsafe.Sizeof(uint8(0))))
@@ -89,7 +93,7 @@ func (c *CPU) Reset(mmu *MMU) {
 	c.SetupOpcodeMap()
 }
 
-// Fill in the opcodeMap and cbOpcodeMap
+// SetupOpcodeMap fills in the opcodeMap and cbOpcodeMap
 func (c *CPU) SetupOpcodeMap() {
 
 	// INC/DEC
@@ -546,7 +550,7 @@ func (c *CPU) SetupOpcodeMap() {
 	}
 	c.opcodeMap[0xCB] = func() string {
 		cbop := c.cbOpcodeMap[c.mmu.ReadByte(c.PC.word+1)]()
-		c.PC.word++ // The length is 2 in total but the CB ins is one byte and the actual instruction is one byte. Since some of the CB instructions call functions which increment c.PC, setting this to increment 1 works best.
+		c.PC.word++ // The length is 2 in total but the CB instruction prefix is one byte and the actual instruction is one byte. Since some of the CB instructions call functions which increment c.PC, setting this to increment 1 works best.
 		c.cycles += 4
 		return "CB " + cbop
 	}
@@ -616,10 +620,10 @@ func (c *CPU) SetupOpcodeMap() {
 		c.UnsetHalfCarryFlag()
 		c.UnsetZeroFlag()
 
-		byte_ := c.mmu.ReadByte(c.HL.word)
-		*c.AF.hi += byte_
+		byte := c.mmu.ReadByte(c.HL.word)
+		*c.AF.hi += byte
 
-		if *c.AF.hi < byte_ {
+		if *c.AF.hi < byte {
 			c.SetCarryFlag()
 			c.SetHalfCarryFlag()
 		}
@@ -664,14 +668,14 @@ func (c *CPU) SetupOpcodeMap() {
 		c.UnsetHalfCarryFlag()
 		c.UnsetZeroFlag()
 
-		byte_ := c.mmu.ReadByte(c.HL.word)
-		if *c.AF.hi < byte_ {
+		byte := c.mmu.ReadByte(c.HL.word)
+		if *c.AF.hi < byte {
 			c.SetCarryFlag()
 			c.SetHalfCarryFlag()
-		} else if *c.AF.hi == byte_ {
+		} else if *c.AF.hi == byte {
 			c.SetZeroFlag()
 		}
-		*c.AF.hi -= byte_
+		*c.AF.hi -= byte
 		c.PC.word++
 		c.cycles += 8
 		return "SUB (HL)"
@@ -705,8 +709,8 @@ func (c *CPU) SetupOpcodeMap() {
 		return "XOR L"
 	}
 	c.opcodeMap[0xAE] = func() string {
-		byte_ := c.mmu.ReadByte(c.HL.word)
-		*c.AF.hi ^= byte_
+		byte := c.mmu.ReadByte(c.HL.word)
+		*c.AF.hi ^= byte
 		if *c.AF.hi == 0 {
 			c.SetZeroFlag()
 		} else {
@@ -749,8 +753,8 @@ func (c *CPU) SetupOpcodeMap() {
 		return "OR L"
 	}
 	c.opcodeMap[0xB6] = func() string {
-		byte_ := c.mmu.ReadByte(c.HL.word)
-		*c.AF.hi |= byte_
+		byte := c.mmu.ReadByte(c.HL.word)
+		*c.AF.hi |= byte
 		if *c.AF.hi == 0 {
 			c.SetZeroFlag()
 		} else {
@@ -799,15 +803,15 @@ func (c *CPU) SetupOpcodeMap() {
 }
 
 // CPByte compares a byte with the value in the A register, setting whichever flags are relevant to the result.
-func (c *CPU) CPByte(byte_ uint8) {
+func (c *CPU) CPByte(byte uint8) {
 	c.SetSubtractionFlag()
 	c.UnsetZeroFlag()
 	c.UnsetCarryFlag()
 	c.UnsetHalfCarryFlag()
-	if *c.AF.hi-byte_ == 0 {
+	if *c.AF.hi-byte == 0 {
 		c.SetZeroFlag()
 	}
-	if *c.AF.hi < byte_ {
+	if *c.AF.hi < byte {
 		c.SetCarryFlag()
 		c.SetHalfCarryFlag()
 	}
@@ -966,7 +970,7 @@ func (c *CPU) LdReg8Adr(register *uint8, address uint16) {
 	c.cycles += 8
 }
 
-// LdHLA copies the value of register A into the memory address specified.
+// LdAdrA copies the value of register A into the memory address specified.
 func (c *CPU) LdAdrA(address uint16) {
 	c.mmu.WriteByte(address, *c.AF.hi)
 	c.PC.word++
@@ -1021,7 +1025,7 @@ func (c *CPU) SubReg(register *uint8) {
 	c.cycles += 4
 }
 
-// Xors a register with register A and stores the result in A.
+// XorReg xors a register with register A and stores the result in A.
 func (c *CPU) XorReg(register *uint8) {
 	*c.AF.hi ^= *register
 	if *c.AF.hi == 0 {
@@ -1036,7 +1040,7 @@ func (c *CPU) XorReg(register *uint8) {
 	c.cycles += 4
 }
 
-// Ors a register with register A and stores the result in A.
+// OrReg ors a register with register A and stores the result in A.
 // Returns the length and duration of the instruction.
 func (c *CPU) OrReg(register *uint8) {
 	*c.AF.hi |= *register
@@ -1064,25 +1068,24 @@ func (c *CPU) Start() func() {
 
 	var insCount = uint64(0)
 	start := time.Now()
-	// var timeDelay time.Duration
-	// var dt time.Duration
-	// oldTime := time.Now()
-	// oldCycles := uint64(0)
+	var timeDelay time.Duration
+	var dt time.Duration
+	oldTime := time.Now()
+	oldCycles := uint64(0)
 
 	return func() {
 
-		// oldCycles = c.cycles
-		// oldTime = time.Now()
+		oldCycles = c.cycles
+		oldTime = time.Now()
 		// Proccess the current opcode
 		lastIns = c.opcodeMap[c.mmu.ReadByte(c.PC.word)]()
-		time.Sleep(100 * time.Microsecond)
-		// dt = time.Now().Sub(oldTime)
+		dt = time.Now().Sub(oldTime)
 
-		// timeDelay = time.Duration(c.cycles-oldCycles) * (65 * time.Nanosecond)
-		// if dt < timeDelay {
-		// 	// fmt.Println(timeDelay - dt)
-		// 	time.Sleep(timeDelay - dt)
-		// }
+		timeDelay = time.Duration(c.cycles-oldCycles) * (20 * time.Nanosecond)
+		if dt < timeDelay {
+			// fmt.Println(timeDelay - dt)
+			time.Sleep(timeDelay - dt)
+		}
 
 		if c.cycles > 5000000 {
 			fmt.Println("5M CPU ops in", time.Now().Sub(start))
@@ -1091,7 +1094,6 @@ func (c *CPU) Start() func() {
 		}
 		insCount++
 
-		// fmt.Printf("%X ", c.PC.word)
 		if c.PC.word == 0x100 {
 			c.breaking = true
 		}

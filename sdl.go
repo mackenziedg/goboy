@@ -28,7 +28,7 @@ func (s *SDL) Start(gb *GameBoy) func() {
 	check(err)
 	surface.FillRect(nil, 0)
 
-	rect := sdl.Rect{0, 0, 200, 200}
+	rect := sdl.Rect{X: 0, Y: 0, W: 200, H: 200}
 	surface.FillRect(&rect, 0xffff0000)
 	window.UpdateSurface()
 
@@ -70,6 +70,7 @@ func (s *SDL) Start(gb *GameBoy) func() {
 				gfx.PixelColor(renderer, int32(i%256), int32(i/256), s.ConvertColor(v))
 			}
 			renderer.Present()
+			// fmt.Printf("SCX: %X, SCY: %X\n", gb.mmu.ReadByte(0xFF42), gb.mmu.ReadByte(0xFF43))
 		}
 	}
 }
