@@ -104,7 +104,7 @@ func (g *GameBoy) Start() func() {
 	var cyclesPerFrame = uint64(69833)
 	var currentCycles = uint64(0)
 	start := time.Now()
-	frameDelay := 16750 * time.Microsecond // About 59.7 Hz
+	frameDelay := 16750419 * time.Nanosecond // 59.7 Hz
 
 	return func() {
 		for currentCycles < cyclesPerFrame {
