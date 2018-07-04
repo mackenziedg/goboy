@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestCPU(t *testing.T) {
+func TestCPUInstructions(t *testing.T) {
 	mmu := &(MMU{})
 	cpu := &(CPU{})
 	cpu.Reset(mmu)
@@ -35,97 +35,122 @@ func TestCPU(t *testing.T) {
 	// 	t.Skipf(formatStr, tmp...)
 	// }
 
-	// Test rotations
+}
 
-	// RL
-	reg := uint8(1)
-	cpu.UnsetCarryFlag()
+func TestRL(t *testing.T) {
+	mmu := &(MMU{})
+	cpu := &(CPU{})
+	cpu.Reset(mmu)
 
-	cpu.Rotate(&reg, 9)
-	if reg != 2 {
-		t.Errorf("rotate gave %b instead of %b", reg, 2)
-	}
-	if cpu.GetCarryFlag() {
-		t.Errorf("carry flag should not be set")
-	}
-
-	cpu.SetCarryFlag()
-
-	cpu.Rotate(&reg, 9)
-	if reg != 5 {
-		t.Errorf("rotate gave %b instead of %b", reg, 5)
-	}
-	if cpu.GetCarryFlag() {
-		t.Errorf("carry flag should not be set")
+	tables := []struct {
+		reg    uint8
+		carry  bool
+		output uint8
+	}{
+		{16, false, 32},
+		{1, true, 3},
 	}
 
-	reg = 128
-	cpu.Rotate(&reg, 9)
-	if reg != 0 {
-		t.Errorf("rotate gave %b instead of %b", reg, 1)
+	for _, table := range tables {
+		if table.carry {
+			cpu.SetCarryFlag()
+		} else {
+			cpu.UnsetCarryFlag()
+		}
+		orig := table.reg
+		cpu.RotateLeft(&table.reg)
+
+		if table.reg != table.output {
+			t.Errorf("RL %d gave %b instead of %b", orig, table.reg, table.output)
+		}
 	}
-	if !cpu.GetCarryFlag() {
-		t.Errorf("carry flag should be set")
+}
+
+func TestRR(t *testing.T) {
+	mmu := &(MMU{})
+	cpu := &(CPU{})
+	cpu.Reset(mmu)
+
+	tables := []struct {
+		reg    uint8
+		carry  bool
+		output uint8
+	}{
+		{16, false, 8},
+		{2, true, 129},
 	}
 
-	// RR
-	reg = 1
-	cpu.UnsetCarryFlag()
-	cpu.Rotate(&reg, -9)
-	if reg != 0 {
-		t.Errorf("rotate gave %b instead of %b", reg, 0)
+	for _, table := range tables {
+		if table.carry {
+			cpu.SetCarryFlag()
+		} else {
+			cpu.UnsetCarryFlag()
+		}
+		orig := table.reg
+		cpu.RotateRight(&table.reg)
+
+		if table.reg != table.output {
+			t.Errorf("RR %d gave %b instead of %b", orig, table.reg, table.output)
+		}
 	}
-	if !cpu.GetCarryFlag() {
-		t.Errorf("carry flag should be set")
+}
+
+func TestRLC(t *testing.T) {
+	mmu := &(MMU{})
+	cpu := &(CPU{})
+	cpu.Reset(mmu)
+
+	tables := []struct {
+		reg    uint8
+		output uint8
+		carry  bool
+	}{
+		{16, 16, false},
+		{128, 129, true},
 	}
 
-	reg = 2
-	cpu.SetCarryFlag()
-	cpu.Rotate(&reg, -9)
-	if reg != 129 {
-		t.Errorf("rotate gave %b instead of %b", reg, 129)
+	for _, table := range tables {
+		orig := table.reg
+		cpu.RotateLeftCarry(&table.reg)
+
+		if table.reg != table.output {
+			t.Errorf("RLC %d, gave %b instead of %b", orig, table.reg, table.output)
+		}
+		if cpu.GetCarryFlag() != table.carry {
+			t.Errorf("RLC %d, gave carry = %v instead of %v", orig, cpu.GetCarryFlag(), table.carry)
+		}
 	}
-	if cpu.GetCarryFlag() {
-		t.Errorf("carry flag should not be set")
+}
+
+func TestRRC(t *testing.T) {
+	mmu := &(MMU{})
+	cpu := &(CPU{})
+	cpu.Reset(mmu)
+
+	tables := []struct {
+		reg    uint8
+		output uint8
+		carry  bool
+	}{
+		{16, 16, false},
+		{1, 129, true},
 	}
 
-	// RLC
-	reg = 1
-	cpu.UnsetCarryFlag()
-	cpu.RotateCarry(&reg, 9)
-	if reg != 2 {
-		t.Errorf("rotate gave %b instead of %b", reg, 129)
-	}
+	for _, table := range tables {
+		if table.carry {
+			cpu.SetCarryFlag()
+		} else {
+			cpu.UnsetCarryFlag()
+		}
+		orig := table.reg
+		cpu.RotateRightCarry(&table.reg)
 
-	reg = 128
-	cpu.UnsetCarryFlag()
-	cpu.RotateCarry(&reg, 9)
-	if reg != 1 {
-		t.Errorf("rotate gave %b instead of %b", reg, 129)
-	}
-	if !cpu.GetCarryFlag() {
-		t.Errorf("carry flag should be set")
-	}
+		if table.reg != table.output {
+			t.Errorf("RRC %d, gave %b instead of %b", orig, table.reg, table.output)
+		}
+		if cpu.GetCarryFlag() != table.carry {
+			t.Errorf("RRC %d, gave carry = %v instead of %v", orig, cpu.GetCarryFlag(), table.carry)
 
-	// RRC
-	reg = 1
-	cpu.UnsetCarryFlag()
-	cpu.RotateCarry(&reg, -9)
-	if reg != 127 {
-		t.Errorf("rotate gave %b instead of %b", reg, 129)
+		}
 	}
-	if !cpu.GetCarryFlag() {
-		t.Errorf("carry flag should be set")
-	}
-
-	reg = 128
-	cpu.UnsetCarryFlag()
-	cpu.RotateCarry(&reg, 9)
-	if reg != 1 {
-		t.Errorf("rotate gave %b instead of %b", reg, 129)
-	}
-	if !cpu.GetCarryFlag() {
-		t.Errorf("carry flag should be set")
-	}
-
 }

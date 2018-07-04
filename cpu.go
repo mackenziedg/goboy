@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"io/ioutil"
-	"math/bits"
 	"unsafe"
 )
 
@@ -563,20 +562,20 @@ func (c *CPU) SetupOpcodeMap() {
 
 	// Arithmetic
 	c.opcodeMap[0x07] = func() string {
-		c.RotateCarry(c.AF.hi, 9)
+		c.RotateLeftCarry(c.AF.hi)
 		return "RLCA"
 	}
 	c.opcodeMap[0x17] = func() string {
-		c.Rotate(c.AF.hi, 9)
+		c.RotateLeft(c.AF.hi)
 		return "RLA"
 	}
 
 	c.opcodeMap[0x1F] = func() string {
-		c.Rotate(c.AF.hi, -9)
+		c.RotateRight(c.AF.hi)
 		return "RRA"
 	}
 	c.opcodeMap[0x0F] = func() string {
-		c.RotateCarry(c.AF.hi, -9)
+		c.RotateRightCarry(c.AF.hi)
 		return "RRCA"
 	}
 
@@ -858,7 +857,7 @@ func (c *CPU) SetupOpcodeMap() {
 		return "BIT 7,H"
 	}
 	c.cbOpcodeMap[0x11] = func() string {
-		c.Rotate(c.BC.lo, 9)
+		c.RotateLeft(c.BC.lo)
 		return "RL C"
 	}
 	c.cbOpcodeMap[0x37] = func() string {
@@ -897,41 +896,24 @@ func (c *CPU) CPByte(byte uint8) {
 	c.cycles += 8
 }
 
-// Rotate rotates a byte by a given amount.
-func (c *CPU) Rotate(register *uint8, amt int) {
-	toCarry := false
+// RotateLeft rotates a byte left by 9, carries the overflow bit, and puts the carry bit in the 0th bit.
+func (c *CPU) RotateLeft(register *uint8) {
+	setCarry := CheckBit(register, 7)
 
-	carryBit := uint8(0)
-	if amt > 1 {
-		carryBit = 7
-	}
+	*register = (*register << 1) | (*register >> 7)
 
-	if CheckBit(register, carryBit) {
-		toCarry = true
-	}
-
-	*register = bits.RotateLeft8(*register, amt)
-
-	// Set the carryBit to 1 or 0 depending on the CarryFlag value
 	if c.GetCarryFlag() {
-		if amt > 1 {
-			*register |= 1
-		} else {
-			*register |= 128
-		}
+		*register |= 1
 	} else {
-		if amt > 1 {
-			*register &= 254
-		} else {
-			*register &= 127
-		}
+		*register &= 254
 	}
 
-	if toCarry {
+	if setCarry {
 		c.SetCarryFlag()
 	} else {
 		c.UnsetCarryFlag()
 	}
+
 	if *register == 0 {
 		c.UnsetZeroFlag()
 	} else {
@@ -944,18 +926,65 @@ func (c *CPU) Rotate(register *uint8, amt int) {
 	c.cycles += 4
 }
 
-// RotateCarry rotates a byte by a given amount and carrys the overflow bit.
-func (c *CPU) RotateCarry(register *uint8, amt int) {
-	carryBit := uint8(0)
-	if amt > 1 {
-		carryBit = 7
+// RotateRight rotates a byte right by 9, carries the overflow bit, and puts the carry bit in the 7th bit.
+func (c *CPU) RotateRight(register *uint8) {
+	setCarry := CheckBit(register, 0)
+
+	*register = (*register >> 1) | (*register << 7)
+
+	if c.GetCarryFlag() {
+		*register |= 128
+	} else {
+		*register &= 127
 	}
-	if CheckBit(register, carryBit) {
+
+	if setCarry {
 		c.SetCarryFlag()
 	} else {
 		c.UnsetCarryFlag()
 	}
-	*register = bits.RotateLeft8(*register, amt)
+
+	if *register == 0 {
+		c.UnsetZeroFlag()
+	} else {
+		c.SetZeroFlag()
+	}
+	c.UnsetHalfCarryFlag()
+	c.UnsetSubtractionFlag()
+
+	c.PC.word++
+	c.cycles += 4
+}
+
+// RotateLeftCarry rotates a byte left by 8 and carries the overflow bit into the carry flag and the 0th bit.
+func (c *CPU) RotateLeftCarry(register *uint8) {
+
+	if CheckBit(register, 7) {
+		c.SetCarryFlag()
+		*register |= 1
+	} else {
+		c.UnsetCarryFlag()
+		*register &= 254
+	}
+
+	c.UnsetZeroFlag()
+	c.UnsetHalfCarryFlag()
+	c.UnsetSubtractionFlag()
+	c.PC.word++
+	c.cycles += 4
+}
+
+// RotateRightCarry rotates a byte right by 8 and carries the overflow bit into the carry flag and 7th bit.
+func (c *CPU) RotateRightCarry(register *uint8) {
+
+	if CheckBit(register, 0) {
+		c.SetCarryFlag()
+		*register |= 128
+	} else {
+		c.UnsetCarryFlag()
+		*register &= 127
+	}
+
 	c.UnsetZeroFlag()
 	c.UnsetHalfCarryFlag()
 	c.UnsetSubtractionFlag()
