@@ -554,7 +554,7 @@ func (c *CPU) SetupOpcodeMap() {
 		return "CALL a16"
 	}
 	c.opcodeMap[0xEF] = func() string {
-		c.mmu.WriteWord(c.SP.word, c.PC.word+3)
+		c.mmu.WriteWord(c.SP.word, c.PC.word+1)
 		c.SP.word -= 2
 		c.PC.word = 0x28
 		c.cycles += 16
@@ -1176,23 +1176,30 @@ func (c *CPU) Start() func() uint64 {
 	return func() uint64 {
 
 		var startCycles = c.cycles
-		if c.PC.word > 0x100 {
-			fmt.Printf("Current: %x Next: %x\n", c.mmu.ReadByte(c.PC.word), c.mmu.ReadByte(c.PC.word+1))
-		}
+
 		lastIns = c.opcodeMap[c.mmu.ReadByte(c.PC.word)]()
 
 		// if c.PC.word == 0x100 {
 		// 	c.breaking = true
 		// }
 
+		// Hacky way to set memory to required values after booting
+		// FIXME: These values should be set from the bootloader
+		if c.PC.word == 0x100 {
+			var pts = []uint16{0xFF05, 0xFF06, 0xFF07, 0xFF10, 0xFF11, 0xFF12, 0xFF14, 0xFF16, 0xFF17, 0xFF19, 0xFF1A, 0xFF1B, 0xFF1C, 0xFF1E, 0xFF20, 0xFF21, 0xFF22, 0xFF23, 0xFF24, 0xFF25, 0xFF26, 0xFF40, 0xFF42, 0xFF43, 0xFF45, 0xFF47, 0xFF48, 0xFF49, 0xFF4A, 0xFF4B, 0xFFFF}
+			var vals = []uint8{0, 0, 0, 0x80, 0xBF, 0xF3, 0xBF, 0x3F, 0, 0xBF, 0x7F, 0xFF, 0x9F, 0xBF, 0xFF, 0, 0, 0xBF, 0x77, 0xF3, 0xF1, 0x91, 0, 0, 0, 0xFC, 0xFF, 0xFF, 0, 0, 0}
+
+			for ix, v := range pts {
+				c.mmu.memory[v] = vals[ix]
+			}
+		}
 		// if c.breaking {
 		// 	fmt.Printf("%X\t", c.PC.word)
 		// 	c.PrintInstruction(lastIns)
 		// 	c.PrintRegisters()
 		// 	c.PrintFlagRegister()
-		// 	if _, err := fmt.Scanln(); err != nil {
-		// 		fmt.Printf("scanln encountered an error %v", err)
-		// 	}
+
+		// 	fmt.Scanln()
 		// }
 
 		return c.cycles - startCycles
@@ -1266,10 +1273,11 @@ func (c *CPU) PrintInstruction(name string) {
 
 // PrintRegisters prints the stack pointer location and data, and the values in each register except the flag register.
 func (c *CPU) PrintRegisters() {
-	fmt.Printf("\tStack pointer: %X ($%X) \n\t\tA: %X, B: %X, C: %X, D: %X, E: %X, H: %X, L: %X\n",
+	fmt.Printf("\tStack pointer: %X ($%X) \n\t\tA: %X, F: %X, B: %X, C: %X, D: %X, E: %X, H: %X, L: %X\n",
 		c.SP.word,
 		c.mmu.ReadWord(c.SP.word+2),
 		*c.AF.hi,
+		*c.AF.lo,
 		*c.BC.hi,
 		*c.BC.lo,
 		*c.DE.hi,
