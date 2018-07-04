@@ -1179,20 +1179,12 @@ func (c *CPU) Start() func() uint64 {
 
 		lastIns = c.opcodeMap[c.mmu.ReadByte(c.PC.word)]()
 
-		// if c.PC.word == 0x100 {
-		// 	c.breaking = true
-		// }
-
-		// Hacky way to set memory to required values after booting
-		// FIXME: These values should be set from the bootloader
 		if c.PC.word == 0x100 {
-			var pts = []uint16{0xFF05, 0xFF06, 0xFF07, 0xFF10, 0xFF11, 0xFF12, 0xFF14, 0xFF16, 0xFF17, 0xFF19, 0xFF1A, 0xFF1B, 0xFF1C, 0xFF1E, 0xFF20, 0xFF21, 0xFF22, 0xFF23, 0xFF24, 0xFF25, 0xFF26, 0xFF40, 0xFF42, 0xFF43, 0xFF45, 0xFF47, 0xFF48, 0xFF49, 0xFF4A, 0xFF4B, 0xFFFF}
-			var vals = []uint8{0, 0, 0, 0x80, 0xBF, 0xF3, 0xBF, 0x3F, 0, 0xBF, 0x7F, 0xFF, 0x9F, 0xBF, 0xFF, 0, 0, 0xBF, 0x77, 0xF3, 0xF1, 0x91, 0, 0, 0, 0xFC, 0xFF, 0xFF, 0, 0, 0}
-
-			for ix, v := range pts {
-				c.mmu.memory[v] = vals[ix]
+			if err := c.CheckMemoryAfterBoot(); err != nil {
+				panic(err)
 			}
 		}
+
 		// if c.breaking {
 		// 	fmt.Printf("%X\t", c.PC.word)
 		// 	c.PrintInstruction(lastIns)
@@ -1204,6 +1196,47 @@ func (c *CPU) Start() func() uint64 {
 
 		return c.cycles - startCycles
 	}
+}
+
+// CheckMemoryAfterBoot checks to ensure the registers and memory are set to the correct values when the bootloader is finished.
+// If any values are incorrect, the function returns the faulty values.
+func (c *CPU) CheckMemoryAfterBoot() error {
+	var pts = []uint16{0xFF05, 0xFF06, 0xFF07, 0xFF10, 0xFF11, 0xFF12, 0xFF14, 0xFF16, 0xFF17, 0xFF19, 0xFF1A, 0xFF1B, 0xFF1C, 0xFF1E, 0xFF20, 0xFF21, 0xFF22, 0xFF23, 0xFF24, 0xFF25, 0xFF26, 0xFF40, 0xFF42, 0xFF43, 0xFF45, 0xFF47, 0xFF48, 0xFF49, 0xFF4A, 0xFF4B, 0xFFFF}
+	var vals = []uint8{0, 0, 0, 0x80, 0xBF, 0xF3, 0xBF, 0x3F, 0, 0xBF, 0x7F, 0xFF, 0x9F, 0xBF, 0xFF, 0, 0, 0xBF, 0x77, 0xF3, 0xF1, 0x91, 0, 0, 0, 0xFC, 0xFF, 0xFF, 0, 0, 0}
+
+	var flag = false
+	var errString = "invalid memory values\n"
+
+	if c.AF.word != 0x01B0 {
+		flag = true
+		errString += fmt.Sprintf("AF = %X, should be %X\n", c.AF.word, 0x01B0)
+	}
+	if c.BC.word != 0x0013 {
+		flag = true
+		errString += fmt.Sprintf("BC = %X, should be %X\n", c.BC.word, 0x0013)
+	}
+	if c.DE.word != 0x00D8 {
+		flag = true
+		errString += fmt.Sprintf("DE = %X, should be %X\n", c.DE.word, 0x00D8)
+	}
+	if c.HL.word != 0x014D {
+		flag = true
+		errString += fmt.Sprintf("HL = %X, should be %X\n", c.HL.word, 0x014D)
+	}
+
+	for ix, v := range pts {
+		if c.mmu.memory[v] != vals[ix] {
+			errString += fmt.Sprintf("$%X = %X, should be %X\n", v, c.mmu.memory[v], vals[ix])
+			flag = true
+		}
+	}
+
+	if flag {
+		return fmt.Errorf(errString)
+	}
+
+	return nil
+
 }
 
 // SetZeroFlag sets the zero flag to 1.
