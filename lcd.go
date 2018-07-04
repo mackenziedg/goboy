@@ -39,7 +39,6 @@ func (l *LCD) IncLY() {
 	} else {
 		l.VBlankOff()
 	}
-	time.Sleep(16750 * time.Microsecond) // About 59.7 Hz
 }
 
 // ConvertTileToPixels converts an array of tile data into an array of pixel values
@@ -94,6 +93,7 @@ func (l *LCD) Start() func() {
 
 	i := uint64(0)
 	start := time.Now()
+
 	return func() {
 		i++
 

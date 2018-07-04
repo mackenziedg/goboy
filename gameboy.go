@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"strings"
+	"time"
 )
 
 // GameBoy is a wrapper for the hardware components.
@@ -97,21 +98,26 @@ func (g *GameBoy) LoadROMFromFile(path string) {
 }
 
 // Start starts the GameBoy.
-func (g *GameBoy) Start() {
+func (g *GameBoy) Start() func() {
 	cpuStepper := g.cpu.Start()
 	lcdStepper := g.lcd.Start()
+	var cyclesPerFrame = uint64(69833)
+	var currentCycles = uint64(0)
+	start := time.Now()
+	frameDelay := 16750 * time.Microsecond // About 59.7 Hz
 
-	// i := uint64(0)
-	go func() {
-		for {
-			cpuStepper()
+	return func() {
+		for currentCycles < cyclesPerFrame {
+			currentCycles += cpuStepper()
 		}
-		<-done
-	}()
-	go func() {
-		for {
-			lcdStepper()
+		lcdStepper()
+		currentCycles = 0
+
+		elapsedTime := time.Now().Sub(start)
+		if elapsedTime < frameDelay {
+			time.Sleep(frameDelay - elapsedTime)
 		}
-		<-done
-	}()
+
+		start = time.Now()
+	}
 }

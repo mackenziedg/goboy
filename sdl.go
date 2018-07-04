@@ -19,95 +19,100 @@ type SDL struct{}
 
 // Start acts as a wrapper for restarting and loading the GameBoy.
 // TODO: This is not how it should work long term, but for now we're only ever loading one file so eh...
-func (s *SDL) Start(gb *GameBoy) func() {
+func (s *SDL) Start(gb *GameBoy) {
 	gb.Reset()
 	gb.LoadROMFromFile("./data/Tetris.gb")
 
 	// Start the gameboy
-	gb.Start()
+	gbStepper := gb.Start()
 
-	return func() {
+	var winTitle = "goboy"
+	var bgPixelWidth = 256
+	var window *sdl.Window
+	var renderer *sdl.Renderer
+	var err error
 
-		var winTitle = "SDL2 GFX"
-		var bgPixelWidth = 256
-		var window *sdl.Window
-		var renderer *sdl.Renderer
-		var err error
-
-		if err = sdl.Init(sdl.INIT_EVERYTHING); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to initialize SDL: %s\n", err)
+	if err = sdl.Init(sdl.INIT_EVERYTHING); err != nil {
+		if _, err = fmt.Fprintf(os.Stderr, "Failed to initialize SDL: %s\n", err); err != nil {
+			panic(err)
 		}
-		defer sdl.Quit()
+	}
+	defer sdl.Quit()
 
-		if window, err = sdl.CreateWindow(winTitle, sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, SCREENWIDTH, SCREENHEIGHT, sdl.WINDOW_SHOWN); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to create window: %s\n", err)
+	if window, err = sdl.CreateWindow(winTitle, sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, SCREENWIDTH, SCREENHEIGHT, sdl.WINDOW_SHOWN); err != nil {
+		if _, err = fmt.Fprintf(os.Stderr, "Failed to create window: %s\n", err); err != nil {
+			panic(err)
 		}
-		defer window.Destroy()
+	}
+	defer window.Destroy()
 
-		if renderer, err = sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to create renderer: %s\n", err)
+	if renderer, err = sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED); err != nil {
+		if _, err = fmt.Fprintf(os.Stderr, "Failed to create renderer: %s\n", err); err != nil {
+			panic(err)
 		}
-		renderer.SetDrawColor(0, 0, 0, 255)
-		renderer.Clear()
-		defer renderer.Destroy()
+	}
+	renderer.SetDrawColor(0, 0, 0, 255)
+	renderer.Clear()
+	defer renderer.Destroy()
+
+	renderer.Present()
+	pxArray := [0x10000]uint8{}
+	for {
+		check(renderer.Clear())
+		pxArray = gb.lcd.GetBGPixelArray()
+		SCX := gb.mmu.ReadByte(0xFF43)
+		SCY := gb.mmu.ReadByte(0xFF42)
+
+		gbStepper()
+
+		// Dump screen and crash when finished booting
+		// if gb.cpu.PC.word > 0x100 {
+		// 	f, err := os.Create("./BGScreenDump")
+		// 	check(err)
+		// 	defer f.Close()
+
+		// 	var vramPixels bytes.Buffer
+
+		// 	for y := 0; y < 256; y++ {
+		// 		for x := 0; x < 256; x++ {
+		// 			vramPixels.WriteString(strconv.Itoa(int(pxArray[x+SCREENWIDTH*y])))
+		// 		}
+		// 		vramPixels.WriteString("\n")
+		// 	}
+		// 	f.WriteString(vramPixels.String())
+
+		// 	f3, err3 := os.Create("./Tiles")
+		// 	check(err3)
+		// 	defer f.Close()
+
+		// 	var tilesBuf bytes.Buffer
+
+		// 	for tid := 0; tid < 19; tid++ {
+		// 		tile := gb.lcd.LoadTileFromAddress(0x8000 + uint16(tid*16))
+
+		// 		tilesBuf.WriteString(strconv.Itoa(tid))
+		// 		for i := 0; i < 64; i++ {
+		// 			s := strconv.Itoa(int(tile[i]))
+
+		// 			if i%8 == 0 {
+		// 				tilesBuf.WriteString("\n")
+		// 			}
+		// 			tilesBuf.WriteString(s)
+		// 		}
+		// 		tilesBuf.WriteString("\n\n")
+		// 	}
+		// 	f3.WriteString(tilesBuf.String())
+
+		// 	panic("finished booting")
+		// }
+
+		for x := uint8(0); x < SCREENWIDTH; x++ {
+			for y := uint8(0); y < SCREENHEIGHT; y++ {
+				gfx.PixelColor(renderer, int32(SCX+x), int32(SCY+y), s.ConvertColor(pxArray[int(SCX+x)+bgPixelWidth*int(SCX+y)]))
+			}
+		}
 
 		renderer.Present()
-		pxArray := [0x10000]uint8{}
-		for {
-			renderer.Clear()
-			pxArray = gb.lcd.GetBGPixelArray()
-			SCX := gb.mmu.ReadByte(0xFF43)
-			SCY := gb.mmu.ReadByte(0xFF42)
-
-			// Dump screen and crash when finished booting
-			// if gb.cpu.PC.word > 0x100 {
-			// 	f, err := os.Create("./BGScreenDump")
-			// 	check(err)
-			// 	defer f.Close()
-
-			// 	var vramPixels bytes.Buffer
-
-			// 	for y := 0; y < 256; y++ {
-			// 		for x := 0; x < 256; x++ {
-			// 			vramPixels.WriteString(strconv.Itoa(int(pxArray[x+SCREENWIDTH*y])))
-			// 		}
-			// 		vramPixels.WriteString("\n")
-			// 	}
-			// 	f.WriteString(vramPixels.String())
-
-			// 	f3, err3 := os.Create("./Tiles")
-			// 	check(err3)
-			// 	defer f.Close()
-
-			// 	var tilesBuf bytes.Buffer
-
-			// 	for tid := 0; tid < 19; tid++ {
-			// 		tile := gb.lcd.LoadTileFromAddress(0x8000 + uint16(tid*16))
-
-			// 		tilesBuf.WriteString(strconv.Itoa(tid))
-			// 		for i := 0; i < 64; i++ {
-			// 			s := strconv.Itoa(int(tile[i]))
-
-			// 			if i%8 == 0 {
-			// 				tilesBuf.WriteString("\n")
-			// 			}
-			// 			tilesBuf.WriteString(s)
-			// 		}
-			// 		tilesBuf.WriteString("\n\n")
-			// 	}
-			// 	f3.WriteString(tilesBuf.String())
-
-			// 	panic("finished booting")
-			// }
-
-			for x := uint8(0); x < SCREENWIDTH; x++ {
-				for y := uint8(0); y < SCREENHEIGHT; y++ {
-					gfx.PixelColor(renderer, int32(SCX+x), int32(SCY+y), s.ConvertColor(pxArray[int(SCX+x)+bgPixelWidth*int(SCX+y)]))
-				}
-			}
-
-			renderer.Present()
-		}
 	}
 }
 

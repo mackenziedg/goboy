@@ -1080,7 +1080,7 @@ func (c *CPU) OrReg(register *uint8) {
 
 // Start writes the bootloader data into the 0x100-0xFFF range of the MMU and returns a stepping function.
 // This returned function takes one CPU step each time it is called.
-func (c *CPU) Start() func() {
+func (c *CPU) Start() func() uint64 {
 	for i, v := range c.bootloader {
 		address := uint16(i)
 		c.mmu.WriteByte(address, v)
@@ -1088,16 +1088,13 @@ func (c *CPU) Start() func() {
 
 	var lastIns string
 
-	return func() {
+	return func() uint64 {
 
+		var startCycles = c.cycles
 		lastIns = c.opcodeMap[c.mmu.ReadByte(c.PC.word)]()
 
 		if c.PC.word == 0x100 {
 			c.breaking = true
-		}
-
-		if c.cycles%1000000 == 0 {
-			fmt.Println(c.cycles, "cycles.")
 		}
 
 		if c.breaking {
@@ -1105,8 +1102,12 @@ func (c *CPU) Start() func() {
 			c.PrintInstruction(lastIns)
 			c.PrintRegisters()
 			c.PrintFlagRegister()
-			fmt.Scanln()
+			if _, err := fmt.Scanln(); err != nil {
+				fmt.Printf("scanln encountered an error %v", err)
+			}
 		}
+
+		return c.cycles - startCycles
 	}
 }
 

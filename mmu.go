@@ -1,6 +1,8 @@
 package main
 
-import "math/rand"
+import (
+	"math/rand"
+)
 
 // MEMORYSIZE is fixed at pow(2, 16) bytes
 const MEMORYSIZE = 0x10000

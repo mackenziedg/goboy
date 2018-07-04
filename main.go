@@ -12,11 +12,6 @@ func main() {
 	// Create a new GameBoy, clear it, and read in cartridge data.
 	var gb = &(GameBoy{})
 	var sdl = &(SDL{})
-	start := sdl.Start(gb)
+	sdl.Start(gb)
 
-	go func() {
-		start()
-	}()
-
-	<-done
 }
