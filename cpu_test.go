@@ -49,6 +49,8 @@ func TestRL(t *testing.T) {
 	}{
 		{16, false, 32},
 		{1, true, 3},
+		{128, false, 0},
+		{128, true, 1},
 	}
 
 	for _, table := range tables {
@@ -78,6 +80,8 @@ func TestRR(t *testing.T) {
 	}{
 		{16, false, 8},
 		{2, true, 129},
+		{1, false, 0},
+		{1, true, 128},
 	}
 
 	for _, table := range tables {
@@ -151,6 +155,217 @@ func TestRRC(t *testing.T) {
 		if cpu.GetCarryFlag() != table.carry {
 			t.Errorf("RRC %d, gave carry = %v instead of %v", orig, cpu.GetCarryFlag(), table.carry)
 
+		}
+	}
+}
+
+func TestStack(t *testing.T) {
+	mmu := &(MMU{})
+	cpu := &(CPU{})
+	cpu.Reset(mmu)
+
+	cpu.PushWord(0xFFFF)
+
+	var reg uint16
+
+	cpu.PopWord(&reg)
+
+	if reg != 0xFFFF {
+		t.Error("Popped value not the same as pushed.")
+	}
+}
+
+func TestIncDec8(t *testing.T) {
+	mmu := &(MMU{})
+	cpu := &(CPU{})
+	cpu.Reset(mmu)
+
+	reg := uint8(0)
+
+	cpu.Inc8(&reg)
+	if reg != 1 {
+		t.Error("Inc8 not working properly.")
+	}
+
+	cpu.Dec8(&reg)
+	if reg != 0 {
+		t.Error("Dec8 not working properly.")
+	}
+
+	cpu.Dec8(&reg)
+	if reg != 255 {
+		t.Error("Dec8 not underflowing properly.")
+	}
+
+	cpu.Inc8(&reg)
+	if reg != 0 {
+		t.Error("Inc8 not underflowing properly.")
+	}
+}
+
+func TestIncDec16(t *testing.T) {
+	mmu := &(MMU{})
+	cpu := &(CPU{})
+	cpu.Reset(mmu)
+
+	reg := uint16(0)
+
+	cpu.Inc16(&reg)
+	if reg != 1 {
+		t.Error("Inc16 not working properly.")
+	}
+
+	cpu.Dec16(&reg)
+	if reg != 0 {
+		t.Error("Dec16 not working properly.")
+	}
+
+	cpu.Dec16(&reg)
+	if reg != 0xFFFF {
+		t.Error("Dec16 not underflowing properly.")
+	}
+
+	cpu.Inc16(&reg)
+	if reg != 0 {
+		t.Error("Inc16 not underflowing properly.")
+	}
+}
+
+func TestAddReg8(t *testing.T) {
+	mmu := &(MMU{})
+	cpu := &(CPU{})
+	cpu.Reset(mmu)
+
+	tables := []struct {
+		AF  uint8
+		reg uint8
+		sum uint8
+	}{
+		{0, 1, 1},
+		{255, 1, 0},
+	}
+
+	for _, table := range tables {
+		*cpu.AF.hi = table.AF
+		cpu.AddReg8(&table.reg)
+		if *cpu.AF.hi != table.sum {
+			t.Errorf("AddReg8 error. %X + %X = %X, is instead %X", table.AF, table.reg, table.sum, *cpu.AF.hi)
+		}
+	}
+}
+
+func TestAddReg16(t *testing.T) {
+	mmu := &(MMU{})
+	cpu := &(CPU{})
+	cpu.Reset(mmu)
+
+	tables := []struct {
+		HL  uint16
+		reg uint16
+		sum uint16
+	}{
+		{0, 1, 1},
+		{0xFFFF, 1, 0},
+	}
+
+	for _, table := range tables {
+		cpu.HL.word = table.HL
+		cpu.AddReg16(&table.reg)
+		if cpu.HL.word != table.sum {
+			t.Errorf("AddReg16 error. %X + %X = %X, is instead %X", table.HL, table.reg, table.sum, cpu.HL.word)
+		}
+	}
+}
+
+func TestSubReg(t *testing.T) {
+	mmu := &(MMU{})
+	cpu := &(CPU{})
+	cpu.Reset(mmu)
+
+	tables := []struct {
+		AF  uint8
+		reg uint8
+		sum uint8
+	}{
+		{0, 1, 255},
+		{255, 1, 254},
+		{1, 1, 0},
+	}
+
+	for _, table := range tables {
+		*cpu.AF.hi = table.AF
+		cpu.SubReg(&table.reg)
+		if *cpu.AF.hi != table.sum {
+			t.Errorf("SubReg error. %X - %X = %X, is instead %X", table.AF, table.reg, table.sum, *cpu.AF.hi)
+		}
+	}
+}
+
+func TestXorReg(t *testing.T) {
+	mmu := &(MMU{})
+	cpu := &(CPU{})
+	cpu.Reset(mmu)
+
+	tables := []struct {
+		AF  uint8
+		reg uint8
+		xor uint8
+	}{
+		{5, 3, 6},
+		{1, 1, 0},
+	}
+
+	for _, table := range tables {
+		*cpu.AF.hi = table.AF
+		cpu.XorReg(&table.reg)
+		if *cpu.AF.hi != table.xor {
+			t.Errorf("XorReg error. %X ^ %X = %X, is instead %X", table.AF, table.reg, table.xor, *cpu.AF.hi)
+		}
+	}
+}
+
+func TestOrReg(t *testing.T) {
+	mmu := &(MMU{})
+	cpu := &(CPU{})
+	cpu.Reset(mmu)
+
+	tables := []struct {
+		AF  uint8
+		reg uint8
+		or  uint8
+	}{
+		{1, 2, 3},
+		{0, 0, 0},
+	}
+
+	for _, table := range tables {
+		*cpu.AF.hi = table.AF
+		cpu.OrReg(&table.reg)
+		if *cpu.AF.hi != table.or {
+			t.Errorf("OrReg error. %X ^ %X = %X, is instead %X", table.AF, table.reg, table.or, *cpu.AF.hi)
+		}
+	}
+}
+
+func TestAndReg(t *testing.T) {
+	mmu := &(MMU{})
+	cpu := &(CPU{})
+	cpu.Reset(mmu)
+
+	tables := []struct {
+		AF  uint8
+		reg uint8
+		and uint8
+	}{
+		{1, 2, 0},
+		{3, 1, 1},
+	}
+
+	for _, table := range tables {
+		*cpu.AF.hi = table.AF
+		cpu.AndReg(&table.reg)
+		if *cpu.AF.hi != table.and {
+			t.Errorf("AndReg error. %X ^ %X = %X, is instead %X", table.AF, table.reg, table.and, *cpu.AF.hi)
 		}
 	}
 }

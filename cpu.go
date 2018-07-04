@@ -1200,17 +1200,17 @@ func (c *CPU) Start() func() uint64 {
 		c.mmu.WriteByte(address, v)
 	}
 
-	var lastIns string
+	// var lastIns string
 
 	return func() uint64 {
 
 		var startCycles = c.cycles
 
-		lastIns = c.opcodeMap[c.mmu.ReadByte(c.PC.word)]()
+		_ = c.opcodeMap[c.mmu.ReadByte(c.PC.word)]()
 
 		if c.PC.word == 0x100 {
 			if err := c.CheckMemoryAfterBoot(); err != nil {
-				panic(err)
+				// panic(err)
 			}
 		}
 
