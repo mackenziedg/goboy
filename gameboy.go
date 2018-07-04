@@ -14,6 +14,9 @@ type GameBoy struct {
 	mmu *MMU
 	lcd *LCD
 	apu *APU
+
+	cartridge  []byte
+	interrupts map[uint16]uint8
 }
 
 // Reset creates new hardware, links the memory to the processors, and resets each component.
@@ -91,14 +94,32 @@ func (g *GameBoy) LoadROMFromFile(path string) {
 	check(err)
 	fmt.Printf("Loaded 0x%X bytes of data.\n", len(dat))
 
+	g.cartridge = dat
+
 	g.Reset()
 
-	g.mmu.LoadCartridgeData(dat)
+	g.mmu.LoadCartridgeData(g.cartridge)
 	g.CheckCartridgeHeader()
+}
+
+func (g *GameBoy) SetupInterrupts() {
+	g.interrupts = map[uint16]uint8{}
+	g.interrupts[0xFF50] = 0x00
+}
+
+func (g *GameBoy) HandleInterrupts() {
+	if g.interrupts[0xFF50] == 0 && g.mmu.memory[0xFF50] == 1 {
+		fmt.Println("Writing cartridge header to $0000-$0100")
+		for byte := 0; byte < 0x100; byte++ {
+			g.mmu.memory[uint16(byte)] = g.cartridge[byte]
+		}
+		g.interrupts[0xFF50] = 1
+	}
 }
 
 // Start starts the GameBoy.
 func (g *GameBoy) Start() func() {
+	g.SetupInterrupts()
 	cpuStepper := g.cpu.Start()
 	lcdStepper := g.lcd.Start()
 	var cyclesPerFrame = uint64(69833)
@@ -117,6 +138,8 @@ func (g *GameBoy) Start() func() {
 		if elapsedTime < frameDelay {
 			time.Sleep(frameDelay - elapsedTime)
 		}
+
+		g.HandleInterrupts()
 
 		start = time.Now()
 	}
