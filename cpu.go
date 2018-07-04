@@ -435,6 +435,12 @@ func (c *CPU) SetupOpcodeMap() {
 		c.cycles += 12
 		return "LDH A,a8"
 	}
+	c.opcodeMap[0x2F] = func() string {
+		*c.AF.hi = c.mmu.ReadByte(0xFF00 | uint16(*c.BC.lo))
+		c.PC.word += 2
+		c.cycles += 8
+		return "LDH A,(C)"
+	}
 
 	// LD RR,d16
 	c.opcodeMap[0x01] = func() string {
@@ -486,6 +492,12 @@ func (c *CPU) SetupOpcodeMap() {
 		c.mmu.WriteByte(c.HL.word, *c.AF.hi)
 		c.Inc16(&c.HL.word)
 		return "LD (HL+),A"
+	}
+	c.opcodeMap[0x36] = func() string {
+		c.mmu.WriteByte(c.HL.word, c.mmu.ReadByte(c.PC.word+1))
+		c.PC.word += 2
+		c.cycles += 12
+		return "LD (HL),d8"
 	}
 	c.opcodeMap[0xE0] = func() string {
 		c.mmu.WriteByte(0xFF00|uint16(c.mmu.ReadByte(c.PC.word+1)), *c.AF.hi)
@@ -540,6 +552,13 @@ func (c *CPU) SetupOpcodeMap() {
 		c.PC.word = c.mmu.ReadWord(c.PC.word + 1)
 		c.cycles += 24
 		return "CALL a16"
+	}
+	c.opcodeMap[0xEF] = func() string {
+		c.mmu.WriteWord(c.SP.word, c.PC.word+3)
+		c.SP.word -= 2
+		c.PC.word = 0x28
+		c.cycles += 16
+		return "RST $28"
 	}
 
 	// Arithmetic
@@ -715,6 +734,45 @@ func (c *CPU) SetupOpcodeMap() {
 		c.XorReg(c.AF.hi)
 		return "XOR A"
 	}
+	c.opcodeMap[0xA0] = func() string {
+		c.AndReg(c.BC.hi)
+		return "AND B"
+	}
+	c.opcodeMap[0xA1] = func() string {
+		c.AndReg(c.BC.lo)
+		return "AND C"
+	}
+	c.opcodeMap[0xA2] = func() string {
+		c.AndReg(c.DE.hi)
+		return "AND D"
+	}
+	c.opcodeMap[0xA3] = func() string {
+		c.AndReg(c.DE.lo)
+		return "AND E"
+	}
+	c.opcodeMap[0xA4] = func() string {
+		c.AndReg(c.HL.hi)
+		return "AND H"
+	}
+	c.opcodeMap[0xA5] = func() string {
+		c.AndReg(c.HL.lo)
+		return "AND L"
+	}
+	c.opcodeMap[0xA6] = func() string {
+		byte := c.mmu.ReadByte(c.HL.word)
+		*c.AF.hi &= byte
+		if *c.AF.hi == 0 {
+			c.SetZeroFlag()
+		} else {
+			c.UnsetZeroFlag()
+		}
+		c.UnsetSubtractionFlag()
+		c.SetHalfCarryFlag()
+		c.UnsetCarryFlag()
+		c.PC.word++
+		c.cycles += 8
+		return "AND (HL)"
+	}
 	c.opcodeMap[0xB0] = func() string {
 		c.OrReg(c.BC.hi)
 		return "OR B"
@@ -762,6 +820,10 @@ func (c *CPU) SetupOpcodeMap() {
 		c.CPByte(c.mmu.ReadByte(c.HL.word))
 		return "CP (HL)"
 	}
+	c.opcodeMap[0xFB] = func() string {
+		c.CPByte(*c.AF.hi)
+		return "CP A"
+	}
 	c.opcodeMap[0xFE] = func() string {
 		c.CPByte(c.mmu.ReadByte(c.PC.word + 1))
 		c.PC.word++ // CP d8 is length 2 and CPByte only increases by 1
@@ -792,21 +854,30 @@ func (c *CPU) SetupOpcodeMap() {
 	c.cbOpcodeMap = make(map[uint8]func() string)
 
 	c.cbOpcodeMap[0x7C] = func() string {
-		c.UnsetSubtractionFlag()
-		c.SetHalfCarryFlag()
-		if CheckBit(c.HL.hi, 7) {
-			c.UnsetZeroFlag()
-		} else {
-			c.SetZeroFlag()
-		}
-		c.PC.word++
-		c.cycles += 4
+		c.CBBit(7, c.HL.hi)
 		return "BIT 7,H"
 	}
 	c.cbOpcodeMap[0x11] = func() string {
 		c.Rotate(c.BC.lo, 9)
 		return "RL C"
 	}
+	c.cbOpcodeMap[0x37] = func() string {
+		c.CBBit(6, c.DE.lo)
+		return "BIT 6,E"
+	}
+}
+
+// CBBit sets the Z flag to the opposite of a given bit in a byte
+func (c *CPU) CBBit(bitNum uint8, byte *uint8) {
+	c.UnsetSubtractionFlag()
+	c.SetHalfCarryFlag()
+	if CheckBit(byte, bitNum) {
+		c.UnsetZeroFlag()
+	} else {
+		c.SetZeroFlag()
+	}
+	c.PC.word++
+	c.cycles += 4
 }
 
 // CPByte compares a byte with the value in the A register, setting whichever flags are relevant to the result.
@@ -1063,7 +1134,6 @@ func (c *CPU) XorReg(register *uint8) {
 }
 
 // OrReg ors a register with register A and stores the result in A.
-// Returns the length and duration of the instruction.
 func (c *CPU) OrReg(register *uint8) {
 	*c.AF.hi |= *register
 	if *c.AF.hi == 0 {
@@ -1073,6 +1143,21 @@ func (c *CPU) OrReg(register *uint8) {
 	}
 	c.UnsetSubtractionFlag()
 	c.UnsetHalfCarryFlag()
+	c.UnsetCarryFlag()
+	c.PC.word++
+	c.cycles += 4
+}
+
+// AndReg ands a register with register A and stores the result in A.
+func (c *CPU) AndReg(register *uint8) {
+	*c.AF.hi &= *register
+	if *c.AF.hi == 0 {
+		c.SetZeroFlag()
+	} else {
+		c.UnsetZeroFlag()
+	}
+	c.UnsetSubtractionFlag()
+	c.SetHalfCarryFlag()
 	c.UnsetCarryFlag()
 	c.PC.word++
 	c.cycles += 4
@@ -1091,21 +1176,24 @@ func (c *CPU) Start() func() uint64 {
 	return func() uint64 {
 
 		var startCycles = c.cycles
+		if c.PC.word > 0x100 {
+			fmt.Printf("Current: %x Next: %x\n", c.mmu.ReadByte(c.PC.word), c.mmu.ReadByte(c.PC.word+1))
+		}
 		lastIns = c.opcodeMap[c.mmu.ReadByte(c.PC.word)]()
 
-		if c.PC.word == 0x100 {
-			c.breaking = true
-		}
+		// if c.PC.word == 0x100 {
+		// 	c.breaking = true
+		// }
 
-		if c.breaking {
-			fmt.Printf("%X\t", c.PC.word)
-			c.PrintInstruction(lastIns)
-			c.PrintRegisters()
-			c.PrintFlagRegister()
-			if _, err := fmt.Scanln(); err != nil {
-				fmt.Printf("scanln encountered an error %v", err)
-			}
-		}
+		// if c.breaking {
+		// 	fmt.Printf("%X\t", c.PC.word)
+		// 	c.PrintInstruction(lastIns)
+		// 	c.PrintRegisters()
+		// 	c.PrintFlagRegister()
+		// 	if _, err := fmt.Scanln(); err != nil {
+		// 		fmt.Printf("scanln encountered an error %v", err)
+		// 	}
+		// }
 
 		return c.cycles - startCycles
 	}
